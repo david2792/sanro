@@ -1,0 +1,114 @@
+@import "@fontsource/atkinson-hyperlegible/400.css";
+@import "@fontsource/atkinson-hyperlegible/700.css";
+@import "tailwindcss";
+
+/*
+  Sistema de diseño "cuaderno de clases":
+  tinta azul de bolígrafo sobre papel, margen rojo, y los cuatro colores
+  de la asistencia como único acento fuerte.
+*/
+@theme {
+  --font-sans: "Atkinson Hyperlegible", ui-sans-serif, system-ui, sans-serif;
+
+  --color-papel: #f6f8fb;
+  --color-renglon: #dfe6f1;
+  --color-margen: #d9534f;
+
+  --color-tinta-50: #f1f4fb;
+  --color-tinta-100: #e3e9f7;
+  --color-tinta-200: #c5d2ee;
+  --color-tinta-500: #3b5fc4;
+  --color-tinta-600: #2a4fb0;
+  --color-tinta-700: #1d3b8b;
+  --color-tinta-800: #172f6f;
+  --color-tinta-900: #122454;
+
+  --color-grafito: #1f2933;
+  --color-grafito-600: #3e4a57;
+  --color-grafito-500: #5b6573;
+  --color-grafito-300: #c3cad4;
+  --color-grafito-200: #dde2e9;
+  --color-grafito-100: #edf0f4;
+
+  --color-presente: #1f8a5b;
+  --color-presente-50: #e7f5ee;
+  --color-ausente: #c2362f;
+  --color-ausente-50: #fbeceb;
+  --color-tarde: #b57405;
+  --color-tarde-50: #fdf3e1;
+  --color-justificado: #2a6fb0;
+  --color-justificado-50: #e6f0fa;
+
+  --radius-control: 0.625rem;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: contain;
+  }
+  body {
+    @apply bg-papel text-grafito antialiased;
+    font-feature-settings: "tnum";
+    overscroll-behavior-y: contain;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-tinta-500;
+  }
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+  }
+  button, a, input, select, textarea {
+    touch-action: manipulation;
+  }
+}
+
+/* Hoja rayada con margen: se usa solo en la lista y el login. */
+.hoja-rayada {
+  background-color: #fff;
+  background-image:
+    linear-gradient(90deg, transparent 2.75rem, var(--color-margen) 2.75rem, var(--color-margen) calc(2.75rem + 2px), transparent calc(2.75rem + 2px)),
+    repeating-linear-gradient(180deg, transparent 0, transparent calc(4rem - 1px), var(--color-renglon) calc(4rem - 1px), var(--color-renglon) 4rem);
+}
+
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+}
+
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top), 0.5rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Impresión de reportes: solo el contenido, sin menús ni botones. */
+.solo-imprimir { display: none; }
+#zona-impresion { display: none; }
+@media print {
+  @page { margin: 14mm; }
+  body { background: #fff; }
+  aside, nav, header, .no-imprimir { display: none !important; }
+  .solo-imprimir { display: block; }
+  main { max-width: none !important; padding: 0 !important; }
+  table { page-break-inside: auto; }
+  tr { page-break-inside: avoid; }
+  /* Un recibo suelto: se imprime solo la zona de impresión. */
+  body:has(> #zona-impresion) > :not(#zona-impresion) { display: none !important; }
+  body > #zona-impresion { display: block; }
+}
+
+@keyframes subir {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes aparecer {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.anim-subir { animation: subir 220ms cubic-bezier(.2,.8,.2,1); }
+.anim-aparecer { animation: aparecer 160ms ease-out; }
