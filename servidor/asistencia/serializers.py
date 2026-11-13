@@ -1,7 +1,8 @@
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
-from academico.models import Matricula
+from nucleo import contexto
 from . import justificaciones as tramite
 from .models import Justificacion, PermisoDocente, RegistroAsistencia, SesionClase
 
@@ -17,11 +18,12 @@ class RegistroAsistenciaSerializer(serializers.ModelSerializer):
     estado = serializers.ChoiceField(choices=ESTADOS_LISTA, default=RegistroAsistencia.Estado.PRESENTE)
     justificada = serializers.BooleanField(read_only=True)
     justificacion_estado = serializers.SerializerMethodField()
+    origen = serializers.CharField(read_only=True)
 
     class Meta:
         model = RegistroAsistencia
         fields = ["id", "matricula", "alumno", "estado", "justificada", "justificacion_estado", "hora_llegada",
-                  "minutos_tarde", "observacion"]
+                  "minutos_tarde", "hora_salida", "observacion", "origen"]
 
     def get_justificacion_estado(self, obj):
         """Estado del último justificativo que incluye esta ausencia (sin mostrar su motivo)."""
@@ -29,12 +31,25 @@ class RegistroAsistenciaSerializer(serializers.ModelSerializer):
         return v.justificacion.estado if v else None
 
 
+def puede_corregir(usuario, sesion):
+    """Una lista confirmada la corrige gestión, o su docente el mismo día de la clase."""
+    if usuario.es_gestion:
+        return True
+    docente = getattr(usuario, "docente", None)
+    return docente is not None and sesion.asignacion.docente_id == docente.id and sesion.fecha == timezone.localdate()
+
+
 class SesionClaseSerializer(serializers.ModelSerializer):
     """
     Guarda la lista completa en una sola petición:
-    {uuid, asignacion, fecha, hora_inicio, tema, registros: [{matricula, estado, observacion}]}
-    Si llega de nuevo la misma clase (mismo uuid, o misma asignación y fecha),
-    se actualiza en vez de duplicarse. Así funciona la sincronización sin conexión.
+    {uuid, asignacion, fecha, hora_inicio, tema, confirmar, motivo, sin_conexion,
+     registros: [{matricula, estado, hora_llegada, hora_salida, observacion}]}
+    Si llega de nuevo la misma clase (mismo uuid, o misma asignación y fecha), se actualiza en vez de
+    duplicarse: así funciona la sincronización sin conexión.
+
+    - confirmar (por defecto sí): BORRADOR -> CONFIRMADA. Una lista confirmada no vuelve a borrador.
+    - Cambiar marcas de una lista confirmada es una corrección: exige `motivo` (queda en la auditoría)
+      y solo la hace gestión, o el docente el mismo día de la clase.
     """
 
     uuid = serializers.UUIDField(required=False)
@@ -42,11 +57,17 @@ class SesionClaseSerializer(serializers.ModelSerializer):
     docente = serializers.PrimaryKeyRelatedField(read_only=True)
     docente_nombre = serializers.CharField(source="docente.__str__", read_only=True)
     asignacion_descripcion = serializers.CharField(source="asignacion.__str__", read_only=True)
+    estado = serializers.CharField(read_only=True)
+    confirmar = serializers.BooleanField(write_only=True, required=False, default=True)
+    motivo = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=250)
+    sin_conexion = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = SesionClase
         fields = ["id", "uuid", "asignacion", "asignacion_descripcion", "docente", "docente_nombre",
-                  "fecha", "hora_inicio", "tema", "registros", "creado", "sincronizado"]
+                  "fecha", "hora_inicio", "tema", "estado", "confirmada_en", "registros", "creado", "sincronizado",
+                  "confirmar", "motivo", "sin_conexion", "motivo_anulacion"]
+        read_only_fields = ["confirmada_en", "motivo_anulacion"]
         validators = []  # el upsert se encarga de la unicidad asignación/fecha
 
     def validate(self, data):
@@ -64,63 +85,108 @@ class SesionClaseSerializer(serializers.ModelSerializer):
                 )
         return data
 
+    @staticmethod
+    def _opciones(data):
+        return {k: data.pop(k, d) for k, d in (("confirmar", True), ("motivo", ""), ("sin_conexion", False))}
+
     @transaction.atomic
     def create(self, data):
+        opciones = self._opciones(data)
         registros = data.pop("registros", [])
-        request = self.context["request"]
         sesion = None
         if data.get("uuid"):
-            sesion = SesionClase.objects.filter(uuid=data["uuid"]).first()
+            sesion = SesionClase.todas.filter(uuid=data["uuid"]).first()
             # Un uuid de otra clase u otro día nunca debe pisar esa lista: se ignora.
             if sesion and (sesion.asignacion_id != data["asignacion"].id or sesion.fecha != data["fecha"]):
                 sesion = None
                 data.pop("uuid")
         if sesion is None:
-            sesion = SesionClase.objects.filter(asignacion=data["asignacion"], fecha=data["fecha"]).first()
+            sesion = SesionClase.todas.filter(asignacion=data["asignacion"], fecha=data["fecha"]).first()
         if sesion is None:
-            sesion = SesionClase(**data)
+            sesion = SesionClase(**data, estado=SesionClase.Estado.BORRADOR,
+                                 creado_por=self.context["request"].user)
         else:
             for k, v in data.items():
                 if k != "uuid":
                     setattr(sesion, k, v)
         # La presencia queda a nombre del docente titular de la asignación.
         sesion.docente = data["asignacion"].docente
-        sesion.registrado_por = request.user
-        sesion.save()
-        self._guardar_registros(sesion, registros)
-        return sesion
+        return self._guardar(sesion, registros, **opciones)
 
     @transaction.atomic
     def update(self, sesion, data):
+        opciones = self._opciones(data)
         registros = data.pop("registros", None)
         for k, v in data.items():
             if k != "uuid":
                 setattr(sesion, k, v)
-        sesion.registrado_por = self.context["request"].user
+        return self._guardar(sesion, registros, **opciones)
+
+    def _guardar(self, sesion, registros, confirmar, motivo, sin_conexion):
+        usuario = self.context["request"].user
+        E = SesionClase.Estado
+        if sesion.estado == E.ANULADA:
+            raise serializers.ValidationError(
+                f"La clase de ese día fue anulada ({sesion.motivo_anulacion}). No se puede cargar la lista.")
+        confirmada = sesion.pk is not None and sesion.estado == E.CONFIRMADA
+        motivo = (motivo or "").strip()
+        if confirmada and registros is not None and self._hay_cambios(sesion, registros):
+            if not puede_corregir(usuario, sesion):
+                raise serializers.ValidationError(
+                    "La lista ya fue confirmada. Después del día de clase solo dirección puede corregirla.")
+            if not motivo:
+                raise serializers.ValidationError(
+                    {"motivo": "La lista ya fue confirmada: indicá el motivo de la corrección."})
+            contexto.fijar_motivo(motivo)
+            origen = RegistroAsistencia.Origen.CORRECCION
+        else:
+            origen = RegistroAsistencia.Origen.SIN_CONEXION if sin_conexion else RegistroAsistencia.Origen.WEB
+        if confirmar and sesion.estado == E.BORRADOR:
+            sesion.estado = E.CONFIRMADA
+            sesion.confirmada_en = timezone.now()
+            sesion.confirmada_por = usuario
+        sesion.registrado_por = usuario
         sesion.save()
         if registros is not None:
-            self._guardar_registros(sesion, registros)
+            self._guardar_registros(sesion, registros, origen)
         return sesion
 
-    def _guardar_registros(self, sesion, registros):
-        usuario = self.context["request"].user
+    @staticmethod
+    def _valores(r):
+        """Lo que se guardaría para una marca (la "J" del docente es una ausencia)."""
+        T = RegistroAsistencia.Estado
+        estado = r.get("estado", "P")
+        estado = T.AUSENTE if estado == AVISO else estado
+        return {
+            "estado": estado,
+            # La hora de llegada solo tiene sentido en una tardanza; la de salida, en un retiro.
+            "hora_llegada": r.get("hora_llegada") if estado == T.TARDANZA else None,
+            "hora_salida": r.get("hora_salida") if estado == T.RETIRO else None,
+            "observacion": r.get("observacion", ""),
+        }
+
+    def _hay_cambios(self, sesion, registros):
+        actuales = {r.matricula_id: r for r in sesion.registros.all()}
         for r in registros:
-            estado = r.get("estado", "P")
-            observacion = r.get("observacion", "")
-            con_aviso = estado == AVISO
-            if con_aviso:
-                estado = RegistroAsistencia.Estado.AUSENTE
-            registro, _ = RegistroAsistencia.objects.update_or_create(
-                sesion=sesion, matricula=r["matricula"],
-                defaults={
-                    "estado": estado,
-                    # La hora de llegada solo tiene sentido en una tardanza.
-                    "hora_llegada": r.get("hora_llegada") if estado == RegistroAsistencia.Estado.TARDANZA else None,
-                    "observacion": observacion,
-                },
-            )
-            if con_aviso:
-                tramite.aviso_del_docente(registro, observacion.strip() or "Aviso de ausencia recibido en clase.", usuario)
+            previo = actuales.get(r["matricula"].id)
+            if previo is None or any(getattr(previo, k) != v for k, v in self._valores(r).items()):
+                return True
+        return False
+
+    def _guardar_registros(self, sesion, registros, origen):
+        usuario = self.context["request"].user
+        actuales = {r.matricula_id: r for r in sesion.registros.all()}
+        for r in registros:
+            valores = self._valores(r)
+            previo = actuales.get(r["matricula"].id)
+            if previo is not None and all(getattr(previo, k) == v for k, v in valores.items()):
+                registro = previo  # sin cambios: se conserva su origen
+            else:
+                registro, _ = RegistroAsistencia.todos.update_or_create(
+                    sesion=sesion, matricula=r["matricula"], defaults={**valores, "origen": origen})
+            if r.get("estado") == AVISO:
+                nota = valores["observacion"].strip() or "Aviso de ausencia recibido en clase."
+                tramite.aviso_del_docente(registro, nota, usuario)
             else:
                 tramite.retirar_aviso_del_docente(registro, usuario)
             tramite.recalcular(registro)
@@ -170,12 +236,13 @@ def resumen_asistencia(matriculas_qs, minimo):
     from django.db.models import Count, Q
 
     filas = []
+    vigente = ~Q(asistencias__sesion__estado=SesionClase.Estado.ANULADA)  # Count por relación no usa el administrador
     qs = matriculas_qs.select_related("alumno").annotate(
-        total=Count("asistencias"),
-        presentes=Count("asistencias", filter=Q(asistencias__estado__in=["P", "T"])),
-        ausentes=Count("asistencias", filter=Q(asistencias__estado="A", asistencias__justificada=False)),
-        justificadas=Count("asistencias", filter=Q(asistencias__estado="A", asistencias__justificada=True)),
-        tardanzas=Count("asistencias", filter=Q(asistencias__estado="T")),
+        total=Count("asistencias", filter=vigente),
+        presentes=Count("asistencias", filter=vigente & Q(asistencias__estado__in=RegistroAsistencia.PRESENTES)),
+        ausentes=Count("asistencias", filter=vigente & Q(asistencias__estado="A", asistencias__justificada=False)),
+        justificadas=Count("asistencias", filter=vigente & Q(asistencias__estado="A", asistencias__justificada=True)),
+        tardanzas=Count("asistencias", filter=vigente & Q(asistencias__estado="T")),
     )
     for m in qs:
         pct = round(m.presentes * 100 / m.total, 1) if m.total else None

@@ -39,7 +39,8 @@ export async function guardarSesion(body: any): Promise<{ offline: boolean; data
   } catch (e) {
     if (e instanceof SinConexion) {
       const cola = leer().filter((p) => p.body.uuid !== body.uuid)
-      escribir([...cola, { body, guardado: new Date().toISOString() }])
+      // Se marca como cargada sin conexión (origen de cada marca, plan 7.5).
+      escribir([...cola, { body: { ...body, sin_conexion: true }, guardado: new Date().toISOString() }])
       return { offline: true }
     }
     throw e

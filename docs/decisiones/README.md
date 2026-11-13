@@ -13,3 +13,4 @@ Una decisión no se edita: si cambia, se escribe una nueva que la sustituye.
 | [0006](0006-registro-normativo.md) | Registro normativo versionado | Aceptada |
 | [0007](0007-sin-borrados-fisicos.md) | Sin borrados físicos de registros académicos y financieros | Aceptada |
 | [0008](0008-justificativos.md) | Justificativos como trámite; la ausencia no se reemplaza | Aceptada |
+| [0009](0009-lista-borrador-confirmacion.md) | Lista con borrador y confirmación, correcciones con motivo y anulación | Aceptada |

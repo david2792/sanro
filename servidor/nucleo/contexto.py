@@ -8,15 +8,22 @@ from contextvars import ContextVar
 
 _usuario = ContextVar("sige_usuario", default=None)
 _peticion = ContextVar("sige_peticion", default=None)
+_motivo = ContextVar("sige_motivo", default="")
 
 
 def iniciar(usuario=None, peticion=None):
-    return _usuario.set(usuario), _peticion.set(peticion)
+    return _usuario.set(usuario), _peticion.set(peticion), _motivo.set("")
 
 
 def terminar(tokens):
     _usuario.reset(tokens[0])
     _peticion.reset(tokens[1])
+    _motivo.reset(tokens[2])
+
+
+def fijar_motivo(motivo):
+    """Motivo enviado en el cuerpo de la petición (p. ej. una corrección de lista)."""
+    _motivo.set((motivo or "").strip()[:250])
 
 
 def fijar_usuario(usuario):
@@ -29,7 +36,9 @@ def usuario_actual():
 
 
 def motivo_actual():
-    """Motivo del cambio enviado por el cliente en la cabecera X-Motivo."""
+    """Motivo del cambio: el fijado por la vista o, si no, la cabecera X-Motivo."""
+    if _motivo.get():
+        return _motivo.get()
     peticion = _peticion.get()
     if peticion is None:
         return ""

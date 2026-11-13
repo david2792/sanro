@@ -8,15 +8,43 @@ from academico.models import Asignacion, Matricula
 from personas.models import Docente
 
 
+class SesionesVigentes(models.Manager):
+    """Las clases anuladas no cuentan en ningún lado (siguen en SesionClase.todas)."""
+
+    def get_queryset(self):
+        return super().get_queryset().exclude(estado=SesionClase.Estado.ANULADA)
+
+
 class SesionClase(models.Model):
     """
     Una clase dictada: el docente la abre y llama lista.
     Abrir la sesión registra automáticamente la presencia del docente.
     El `uuid` lo genera el celular del docente, así puede trabajar sin
     internet y reenviar la misma sesión sin duplicarla al sincronizar.
+
+    Flujo (plan 7.4): BORRADOR → CONFIRMADA. Una lista confirmada solo se corrige con motivo
+    (queda en la auditoría). Una clase que no se dio se ANULA con motivo; nunca se borra.
     """
 
+    class Estado(models.TextChoices):
+        BORRADOR = "BORRADOR", "Borrador"
+        CONFIRMADA = "CONFIRMADA", "Confirmada"
+        ANULADA = "ANULADA", "Anulada"
+
+    objects = SesionesVigentes()
+    todas = models.Manager()
+
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    estado = models.CharField(max_length=10, choices=Estado.choices, default=Estado.CONFIRMADA)
+    confirmada_en = models.DateTimeField(null=True, blank=True)
+    confirmada_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                       related_name="+")
+    anulada_en = models.DateTimeField(null=True, blank=True)
+    anulada_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name="+")
+    motivo_anulacion = models.CharField("Motivo de la anulación", max_length=250, blank=True)
+    creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name="+", help_text="Quien llamó lista por primera vez.")
     asignacion = models.ForeignKey(Asignacion, on_delete=models.PROTECT, related_name="sesiones")
     docente = models.ForeignKey(Docente, on_delete=models.PROTECT, related_name="sesiones")
     fecha = models.DateField()
@@ -25,10 +53,13 @@ class SesionClase(models.Model):
     creado = models.DateTimeField(auto_now_add=True)
     sincronizado = models.DateTimeField(auto_now=True)
     registrado_por = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+",
+        help_text="Último que guardó o sincronizó la lista.",
     )
 
     class Meta:
+        base_manager_name = "todas"
+        default_manager_name = "objects"
         ordering = ["-fecha", "-hora_inicio"]
         constraints = [
             models.UniqueConstraint(fields=["asignacion", "fecha"], name="una_lista_por_clase_y_dia"),
@@ -40,11 +71,29 @@ class SesionClase(models.Model):
         return f"{self.fecha} - {self.asignacion}"
 
 
+class RegistrosVigentes(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().exclude(sesion__estado=SesionClase.Estado.ANULADA)
+
+
 class RegistroAsistencia(models.Model):
     class Estado(models.TextChoices):
         PRESENTE = "P", "Presente"
         AUSENTE = "A", "Ausente"
         TARDANZA = "T", "Llegada tardía"
+        RETIRO = "R", "Se retiró antes"
+
+    class Origen(models.TextChoices):
+        WEB = "WEB", "Cargada en línea"
+        SIN_CONEXION = "SIN_CONEXION", "Cargada sin conexión y sincronizada"
+        IMPORTACION = "IMPORTACION", "Importada"
+        CORRECCION = "CORRECCION", "Corrección de una lista confirmada"
+
+    # Estados que cuentan como asistencia (estuvo en clase, aunque sea una parte).
+    PRESENTES = (Estado.PRESENTE, Estado.TARDANZA, Estado.RETIRO)
+
+    objects = RegistrosVigentes()
+    todos = models.Manager()
 
     sesion = models.ForeignKey(SesionClase, on_delete=models.PROTECT, related_name="registros")
     matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="asistencias")
@@ -53,7 +102,9 @@ class RegistroAsistencia(models.Model):
     # Esta marca la mantiene asistencia.justificaciones.recalcular() según los justificativos aprobados.
     justificada = models.BooleanField(default=False, editable=False)
     hora_llegada = models.TimeField("Hora de llegada", null=True, blank=True, help_text="Solo en llegadas tardías.")
+    hora_salida = models.TimeField("Hora de salida", null=True, blank=True, help_text="Solo en retiros anticipados.")
     observacion = models.CharField(max_length=200, blank=True)
+    origen = models.CharField(max_length=12, choices=Origen.choices, default=Origen.WEB)
 
     @property
     def minutos_tarde(self):
@@ -64,6 +115,8 @@ class RegistroAsistencia(models.Model):
         return max(0, (self.hora_llegada.hour * 60 + self.hora_llegada.minute) - (inicio.hour * 60 + inicio.minute))
 
     class Meta:
+        base_manager_name = "todos"
+        default_manager_name = "objects"
         unique_together = ("sesion", "matricula")
         verbose_name = "registro de asistencia"
         verbose_name_plural = "registros de asistencia"

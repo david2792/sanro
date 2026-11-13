@@ -28,9 +28,9 @@ Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de ac
 - ✅ 1.1 Justificativo como proceso aparte con estados; la ausencia no se reemplaza; aprobación parcial;
   sin borrado (decisión 0008). Pantalla `Gestión › Justificativos`.
 - ✅ 1.1 Quitar el estado `J` de la marca de asistencia (datos existentes migrados a justificativos aprobados).
-- Asistencia con borrador y confirmación; correcciones de sesiones confirmadas con motivo obligatorio.
-- Anulación de sesiones de clase con motivo (en vez de borrar).
-- Retiro anticipado; origen de la marca (web, sin conexión, importación, corrección).
+- ✅ 1.2 Asistencia con borrador y confirmación; correcciones de listas confirmadas con motivo (decisión 0009).
+- ✅ 1.2 Anulación de clases con motivo; historial de cambios de cada lista.
+- ✅ 1.2 Retiro anticipado; origen de la marca; quién creó y quién sincronizó.
 - Matrícula: estados del plan (preinscripto, pendiente de documentación, egresado, anulado) y
   historial de cambios de sección sin sobrescribir.
 - Estados del año lectivo (preparación, activo, cierre pendiente, cerrado, archivado).

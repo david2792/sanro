@@ -54,7 +54,8 @@ class FlujoAsistenciaTest(APITestCase):
         self.assertEqual([x["matricula"] for x in lista], [m1, m2])
 
         u = str(uuid.uuid4())
-        body = {"uuid": u, "asignacion": self.asig.id, "fecha": "2027-03-02", "hora_inicio": "07:00",
+        # Borrador: el docente puede reenviarla y ajustarla libremente hasta confirmarla.
+        body = {"uuid": u, "asignacion": self.asig.id, "fecha": "2027-03-02", "hora_inicio": "07:00", "confirmar": False,
                 "registros": [{"matricula": m1, "estado": "P"}, {"matricula": m2, "estado": "A"}]}
         r = self.client.post("/api/sesiones/", body, format="json")
         self.assertEqual(r.status_code, 201, r.data)

@@ -30,8 +30,41 @@ class SesionClaseViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelV
     permission_classes = [EsPersonal]
     filtros = ["asignacion", "fecha", "docente", "asignacion__seccion"]
     campo_institucion = "asignacion__seccion__anio_lectivo__institucion"
-    # Las clases dadas no se borran (docs/decisiones/0007): se corrigen, y en la Fase 1 se anulan con motivo.
+    # Las clases dadas no se borran (docs/decisiones/0007): se corrigen con motivo o se anulan.
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    @action(detail=True, methods=["post"])
+    def anular(self, request, pk=None):
+        """La clase no se dio o se cargó por error: POST {motivo}. Deja de contar en todos los reportes."""
+        from django.utils import timezone
+
+        from .serializers import puede_corregir
+
+        sesion = self.get_object()
+        motivo = (request.data.get("motivo") or "").strip()
+        if not puede_corregir(request.user, sesion):
+            raise ValidationError("Después del día de clase solo dirección puede anular la lista.")
+        if not motivo:
+            raise ValidationError({"motivo": "Indicá por qué se anula la clase."})
+        sesion.estado = SesionClase.Estado.ANULADA
+        sesion.anulada_en = timezone.now()
+        sesion.anulada_por = request.user
+        sesion.motivo_anulacion = motivo[:250]
+        sesion.save()
+        return Response(self.get_serializer(sesion).data)
+
+    @action(detail=True)
+    def historial(self, request, pk=None):
+        """Cambios de la lista y de cada marca, con usuario, fecha, valor anterior y nuevo, y motivo."""
+        from nucleo.models import RegistroAuditoria
+        from nucleo.views import RegistroAuditoriaSerializer
+
+        sesion = self.get_object()
+        registros = [str(i) for i in RegistroAsistencia.todos.filter(sesion=sesion).values_list("id", flat=True)]
+        qs = RegistroAuditoria.objects.filter(
+            Q(modelo="asistencia.sesionclase", objeto_id=str(sesion.id))
+            | Q(modelo="asistencia.registroasistencia", objeto_id__in=registros))
+        return Response(RegistroAuditoriaSerializer(qs, many=True).data)
 
     def get_queryset(self):
         qs = super().get_queryset()  # aplica ?asignacion=&fecha=

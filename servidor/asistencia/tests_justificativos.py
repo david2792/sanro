@@ -28,8 +28,10 @@ class JustificativosTest(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + r.data["access"])
 
     def lista(self, fecha, estado, observacion=""):
-        r = self.client.post("/api/sesiones/", {"asignacion": self.asig.id, "fecha": fecha, "registros": [
-            {"matricula": self.mat.id, "estado": estado, "observacion": observacion}]}, format="json")
+        # Borrador: estas pruebas ajustan la lista varias veces (la corrección de confirmadas se prueba aparte).
+        r = self.client.post("/api/sesiones/", {"asignacion": self.asig.id, "fecha": fecha, "confirmar": False,
+                                                "registros": [{"matricula": self.mat.id, "estado": estado,
+                                                               "observacion": observacion}]}, format="json")
         self.assertEqual(r.status_code, 201, r.data)
         return r.data["registros"][0]
 

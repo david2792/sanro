@@ -8,7 +8,7 @@ import { bloquesDelDia, cn, horaActual, uuid } from '../../lib/utils'
 import { useClase } from './Clase'
 import { FichaAlumno } from './FichaAlumno'
 
-type Estado = 'P' | 'A' | 'T' | 'J'
+type Estado = 'P' | 'A' | 'T' | 'J' | 'R'
 
 const ESTILO: Record<Estado, { letra: string; nombre: string; circulo: string; texto: string }> = {
   P: { letra: 'P', nombre: 'Presente', circulo: 'bg-presente text-white', texto: 'text-grafito' },
@@ -17,9 +17,10 @@ const ESTILO: Record<Estado, { letra: string; nombre: string; circulo: string; t
   // "J" en la lista = ausente con aviso: el servidor la guarda como ausencia y abre un justificativo
   // que dirección o secretaría revisa (la ausencia no se borra).
   J: { letra: 'J', nombre: 'Ausente con aviso', circulo: 'bg-justificado text-white', texto: 'text-justificado' },
+  R: { letra: 'R', nombre: 'Se retiró antes', circulo: 'bg-grafito-500 text-white', texto: 'text-grafito-600' },
 }
 // Un toque avanza al siguiente estado.
-const SIGUIENTE: Record<Estado, Estado> = { P: 'A', A: 'T', T: 'J', J: 'P' }
+const SIGUIENTE: Record<Estado, Estado> = { P: 'A', A: 'T', T: 'J', J: 'R', R: 'P' }
 
 // Estados de un justificativo que todavía cuentan como "aviso" en la lista.
 const AVISO_VIGENTE = ['BORRADOR', 'PRESENTADO', 'EN_REVISION', 'REQUIERE_INFO', 'APROBADO', 'APROBADO_PARCIAL']
@@ -57,6 +58,8 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
   const [id, setId] = useState(uuid())
   const [guardando, setGuardando] = useState(false)
   const [guardada, setGuardada] = useState(false)
+  // Motivo obligatorio para corregir una lista ya confirmada (queda en el historial).
+  const [motivoCorreccion, setMotivoCorreccion] = useState('')
 
   const [busqueda, setBusqueda] = useState('')
   const [filtro, setFiltro] = useState<'TODOS' | Estado>('TODOS')
@@ -73,6 +76,7 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
     for (const r of previo?.registros ?? []) {
       base[r.matricula] = conAviso(r) ? 'J' : r.estado
       if (r.estado === 'T' && r.hora_llegada) llegadas[r.matricula] = r.hora_llegada.slice(0, 5)
+      if (r.estado === 'R' && r.hora_salida) llegadas[r.matricula] = r.hora_salida.slice(0, 5)
       if (conAviso(r) && r.observacion) razones[r.matricula] = r.observacion
     }
     setEstados(base)
@@ -84,6 +88,7 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
     setInicio(previo?.hora_inicio?.slice(0, 5) ?? bloque?.inicio ?? horaActual())
     setId(previo?.uuid ?? uuid())
     setGuardada(!!previo)
+    setMotivoCorreccion('')
     setCargadoPara(clave)
   }
 
@@ -105,10 +110,10 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
     vibrar(14)
     const nuevo = SIGUIENTE[estados[m] ?? 'P']
     setEstados((s) => ({ ...s, [m]: nuevo }))
-    // Al marcarlo tarde se anota la hora de ese momento (se puede corregir).
+    // Al marcarlo tarde (o retirado) se anota la hora de ese momento (se puede corregir).
     setHoras((h) => {
       const n = { ...h }
-      if (nuevo === 'T') n[m] = h[m] ?? horaActual()
+      if (nuevo === 'T' || nuevo === 'R') n[m] = horaActual()
       else delete n[m]
       return n
     })
@@ -136,7 +141,12 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
     setGuardada(false)
   }
 
-  const guardar = async () => {
+  const confirmada = existente.data?.estado === 'CONFIRMADA'
+  const guardar = async (confirmar = true) => {
+    if (confirmada && !motivoCorreccion.trim()) {
+      avisar('La lista ya fue confirmada: escribí el motivo de la corrección.', 'error')
+      return
+    }
     setGuardando(true)
     try {
       vibrar([25, 45, 25])
@@ -145,12 +155,15 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
         asignacion,
         fecha,
         hora_inicio: inicio || null,
+        confirmar,
+        ...(confirmada ? { motivo: motivoCorreccion.trim() } : {}),
         registros: alumnos.data.map((a: any) => {
           const estado = estados[a.matricula] ?? 'P'
           return {
             matricula: a.matricula,
             estado,
             hora_llegada: estado === 'T' ? horas[a.matricula] || null : null,
+            hora_salida: estado === 'R' ? horas[a.matricula] || null : null,
             observacion: estado === 'J' ? (motivos[a.matricula] ?? '').trim().slice(0, 200) : '',
           }
         }),
@@ -159,7 +172,8 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
       setGuardada(true)
       if (r.offline) avisar('Sin señal: la lista quedó guardada en el teléfono y se enviará sola.', 'info')
       else {
-        avisar('Lista guardada')
+        avisar(confirmar ? 'Lista confirmada' : 'Borrador guardado')
+        setMotivoCorreccion('')
         qc.setQueryData(['sesion', asignacion, fecha], r.data)
         void qc.invalidateQueries({ queryKey: ['sesiones-hoy'] })
       }
@@ -167,6 +181,19 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
       avisar(e instanceof Error ? e.message : 'No se pudo guardar la lista.', 'error')
     } finally {
       setGuardando(false)
+    }
+  }
+
+  const anular = async () => {
+    const motivo = window.prompt('¿Por qué se anula esta clase? (queda en el historial)')?.trim()
+    if (!motivo) return
+    try {
+      await api(`/sesiones/${existente.data.id}/anular/`, { method: 'POST', body: { motivo } })
+      avisar('Clase anulada')
+      await qc.invalidateQueries({ queryKey: ['sesion', asignacion, fecha] })
+      void qc.invalidateQueries({ queryKey: ['sesiones-hoy'] })
+    } catch (e) {
+      avisar(e instanceof Error ? e.message : 'No se pudo anular.', 'error')
     }
   }
 
@@ -190,7 +217,7 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
       {/* Barra de control superior con filtros y acción rápida */}
       <div className="mb-3 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs sm:text-sm text-grafito-500">Tocá a un alumno para alternar: <strong>P</strong>resente, <strong>A</strong>usente, <strong>T</strong>arde, <strong>J</strong>ustificada. En tarde se anota la hora; en justificada, el motivo.</p>
+          <p className="text-xs sm:text-sm text-grafito-500">Tocá a un alumno para alternar: <strong>P</strong>resente, <strong>A</strong>usente, <strong>T</strong>arde, <strong>J</strong> ausente con aviso y <strong>R</strong> se retiró antes. En tarde y retiro se anota la hora; en J, el aviso.</p>
           <button onClick={todosPresentes} className="shrink-0 text-xs sm:text-sm font-bold text-tinta-600 hover:underline active:opacity-70">
             Todos presentes
           </button>
@@ -250,11 +277,12 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
         {alumnosFiltrados.map((a: any, i: number) => {
           const e = estados[a.matricula] ?? 'P'
           const est = ESTILO[e]
-          const llegada = e === 'T' ? horas[a.matricula] : undefined
-          const atraso = minutosEntre(inicio, llegada)
+          const llegada = e === 'T' || e === 'R' ? horas[a.matricula] : undefined
+          const atraso = e === 'T' ? minutosEntre(inicio, llegada) : null
           const motivo = e === 'J' ? motivos[a.matricula] ?? '' : ''
           const detalle = e === 'T' && llegada
             ? `Llegó ${llegada}${atraso ? ` · ${atraso} min tarde` : ''}`
+            : e === 'R' && llegada ? `Se retiró ${llegada}`
             : e === 'J' ? 'Con aviso' : est.nombre
           return (
             <li key={a.matricula} className="flex h-16 items-center">
@@ -270,12 +298,12 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
                   {e !== 'P' && <span className={cn('block truncate text-sm', est.texto)}>{detalle}</span>}
                 </span>
               </button>
-              {e === 'T' && (
+              {(e === 'T' || e === 'R') && (
                 <input
                   type="time"
                   value={llegada ?? ''}
                   onChange={(ev) => cambiarHora(a.matricula, ev.target.value)}
-                  aria-label={`Hora de llegada de ${a.alumno}`}
+                  aria-label={`${e === 'T' ? 'Hora de llegada' : 'Hora de salida'} de ${a.alumno}`}
                   className="mr-2 h-9 w-[6.25rem] shrink-0 rounded-lg border border-tarde/40 bg-tarde-50 px-1.5 text-sm font-bold text-tarde focus:outline-none focus:ring-2 focus:ring-tarde/30"
                 />
               )}
@@ -318,6 +346,24 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
         )}
       </ol>
 
+      {confirmada && !guardada && (
+        <label className="mt-4 block rounded-control bg-tarde-50 p-3 text-sm font-bold text-tarde">
+          La lista ya estaba confirmada. Motivo de la corrección (queda en el historial):
+          <input value={motivoCorreccion} onChange={(ev) => setMotivoCorreccion(ev.target.value)} maxLength={250}
+            className="mt-2 block h-10 w-full rounded-lg border border-tarde/40 bg-white px-3 font-normal text-grafito" />
+        </label>
+      )}
+      {existente.data?.estado === 'BORRADOR' && guardada && (
+        <p className="mt-4 rounded-control bg-justificado-50 px-4 py-2.5 text-sm font-bold text-justificado">
+          Es un borrador: falta confirmar la lista.
+        </p>
+      )}
+      {existente.data?.id && (
+        <button type="button" onClick={() => void anular()} className="mt-4 text-sm font-bold text-ausente hover:underline">
+          No se dio esta clase: anular la lista
+        </button>
+      )}
+
       {ficha != null && <FichaAlumno asignacion={asignacion} matricula={ficha} onCerrar={() => setFicha(null)} />}
 
       {/* Barra para guardar, siempre a mano con el pulgar */}
@@ -328,11 +374,20 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
             <span className="text-[#ff8f88]"><span className="text-lg">{cuenta('A')}</span> A</span>
             <span className="text-[#ffc861]"><span className="text-lg">{cuenta('T')}</span> T</span>
             {cuenta('J') > 0 && <span className="text-[#9cc8f2]"><span className="text-lg">{cuenta('J')}</span> J</span>}
+            {cuenta('R') > 0 && <span className="text-grafito-200"><span className="text-lg">{cuenta('R')}</span> R</span>}
           </div>
           {guardada ? (
             <Boton variante="secundario" onClick={onContinuar} className="ring-0">Registrar desarrollo</Boton>
           ) : (
-            <Boton variante="secundario" onClick={guardar} cargando={guardando} className="ring-0">Guardar lista</Boton>
+            <>
+              {!confirmada && (
+                <button type="button" onClick={() => guardar(false)} disabled={guardando}
+                  className="text-sm font-bold text-grafito-200 hover:text-white">Borrador</button>
+              )}
+              <Boton variante="secundario" onClick={() => guardar(true)} cargando={guardando} className="ring-0">
+                {confirmada ? 'Guardar corrección' : 'Confirmar lista'}
+              </Boton>
+            </>
           )}
         </div>
       </div>

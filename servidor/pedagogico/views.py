@@ -11,7 +11,7 @@ from rest_framework.response import Response
 
 from academico.models import Asignacion, DiaNoLectivo, Etapa, Matricula
 from academico.views import FiltroParamsMixin
-from asistencia.models import SesionClase
+from asistencia.models import RegistroAsistencia, SesionClase
 from nucleo.instituciones import PorInstitucionMixin, institucion_de
 from personas.permisos import EsPersonal
 from .models import (Capacidad, Indicador, Instrumento, PlanClase, Puntaje, RegistroAnecdotico,
@@ -308,7 +308,7 @@ class PlanClaseViewSet(PropiasMixin, viewsets.ModelViewSet):
         planes = {p.fecha: p for p in self.get_queryset().filter(asignacion=asignacion, fecha__range=rango)}
         sesiones = set(SesionClase.objects.filter(asignacion=asignacion, fecha__range=rango)
                        .values_list("fecha", flat=True))
-        registros = {r.sesion.fecha: r for r in RegistroClase.objects.filter(
+        registros = {r.sesion.fecha: r for r in RegistroClase.objects.exclude(sesion__estado="ANULADA").filter(
             sesion__asignacion=asignacion, sesion__fecha__range=rango).select_related("sesion", "unidad")}
         trabajos = {}
         for t in Instrumento.objects.filter(asignacion=asignacion, fecha__range=rango).order_by("fecha", "id"):
@@ -671,7 +671,7 @@ def frases(request):
 def resumen_registros(qs):
     c = {(e, j): n for e, j, n in qs.values_list("estado", "justificada").annotate(n=Count("id"))}
     total = sum(c.values())
-    presentes = sum(n for (e, _), n in c.items() if e in ("P", "T"))
+    presentes = sum(n for (e, _), n in c.items() if e in RegistroAsistencia.PRESENTES)
     return {"clases": total, "presentes": presentes, "ausentes": c.get(("A", False), 0),
             "tardanzas": sum(n for (e, _), n in c.items() if e == "T"),
             "justificadas": c.get(("A", True), 0), "porcentaje": round(presentes * 100 / total, 1) if total else None}
@@ -893,7 +893,7 @@ def control_planificacion(request):
         asignacion__seccion__anio_lectivo=anio, fecha__range=rango).values_list("asignacion_id", "fecha"))
     dadas = por_asignacion(SesionClase.objects.filter(
         asignacion__seccion__anio_lectivo=anio, fecha__range=rango).values_list("asignacion_id", "fecha"))
-    desarrollos = por_asignacion(RegistroClase.objects.filter(
+    desarrollos = por_asignacion(RegistroClase.objects.exclude(sesion__estado="ANULADA").filter(
         sesion__asignacion__seccion__anio_lectivo=anio, sesion__fecha__range=rango,
     ).values_list("sesion__asignacion_id", "sesion__fecha"))
     totales = {t["asignacion"]: t for t in PlanClase.objects.filter(asignacion__seccion__anio_lectivo=anio)

@@ -13,7 +13,7 @@ from pedagogico.models import Instrumento, Puntaje, RegistroAnecdotico, Registro
 from personas.models import AlumnoTutor, Docente
 from .models import PermisoDocente, RegistroAsistencia, SesionClase
 
-PRESENTE = {"P", "T"}
+PRESENTE = {"P", "T", "R"}  # el retiro anticipado estuvo en clase
 
 
 def _pct(a, b):
