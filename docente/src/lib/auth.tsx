@@ -1,5 +1,7 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { api, tokens } from './api'
+import { api, borrarCacheLocal, tokens } from './api'
+import { cantidadPendientes, descartarTodo } from './offline'
 
 export type Rol = 'DIRECTOR' | 'COORDINADOR' | 'SECRETARIA' | 'DOCENTE' | 'TUTOR' | 'ACES'
 export type Usuario = {
@@ -41,12 +43,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return u ? JSON.parse(u) : null
   })
   const [cargando, setCargando] = useState(!!tokens.access)
+  const qc = useQueryClient()
 
-  const salir = useCallback(() => {
+  /** Cierra la sesión y borra los datos del colegio guardados en este dispositivo. */
+  const cerrarSesion = useCallback(() => {
     tokens.borrar()
     localStorage.removeItem('sr_usuario')
+    borrarCacheLocal()
+    qc.clear()
     setUsuario(null)
-  }, [])
+  }, [qc])
+
+  /**
+   * Cierre pedido por el usuario. Si hay listas sin enviar, pregunta antes:
+   * cerrar sesión las descarta para que el próximo usuario del teléfono no las vea.
+   * (Si la sesión vence sola, la cola se conserva y se envía al volver a entrar.)
+   */
+  const salir = useCallback(() => {
+    const n = cantidadPendientes()
+    if (n > 0) {
+      const ok = window.confirm(
+        `Hay ${n} ${n === 1 ? 'lista' : 'listas'} sin enviar al servidor. ` +
+          'Si cerrás sesión ahora se van a perder. ¿Cerrar sesión igual?',
+      )
+      if (!ok) return
+      descartarTodo()
+    }
+    cerrarSesion()
+  }, [cerrarSesion])
 
   const cargarYo = useCallback(async () => {
     try {
@@ -54,18 +78,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('sr_usuario', JSON.stringify(yo))
       setUsuario(yo)
     } catch (e: any) {
-      if (e?.status === 401) salir()
+      if (e?.status === 401) cerrarSesion()
     } finally {
       setCargando(false)
     }
-  }, [salir])
+  }, [cerrarSesion])
 
   useEffect(() => {
     if (tokens.access) void cargarYo()
-    const fin = () => salir()
+    const fin = () => cerrarSesion()
     window.addEventListener('sesion-expirada', fin)
     return () => window.removeEventListener('sesion-expirada', fin)
-  }, [cargarYo, salir])
+  }, [cargarYo, cerrarSesion])
 
   const entrar = async (username: string, password: string) => {
     const r = await api('/auth/token/', { method: 'POST', body: { username, password } })

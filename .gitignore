@@ -1,0 +1,10 @@
+# Datos personales de alumnos: NUNCA subir al repositorio
+servidor/datos/*
+!servidor/datos/.gitkeep
+*.csv
+*.xlsx
+
+# Respaldos y archivos temporales
+_to_delete/
+*.tgz
+*.zip

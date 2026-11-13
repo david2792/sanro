@@ -7,16 +7,26 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv(
-    "SECRET_KEY", "django-insecure-5n(h8a8hv7y4hgk)ib&7go^n(r4i+f**7mj3k%)9m0i&f7lil4"
-)
-DEBUG = os.getenv("DEBUG", "True") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+# Seguro por defecto: sin .env el sistema arranca en modo producción (DEBUG apagado).
+# Para desarrollar, poné DEBUG=True en servidor/.env (ver .env.ejemplo).
+DEBUG = os.getenv("DEBUG", "False").strip().lower() in ("true", "1", "si", "sí")
+
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+if not SECRET_KEY or SECRET_KEY.startswith("cambiar-por"):
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "Falta SECRET_KEY en servidor/.env. Generá una con: "
+            "python -c \"from django.core.management.utils import get_random_secret_key as g; print(g())\""
+        )
+    SECRET_KEY = "django-insecure-solo-para-desarrollo-local"
+
+ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
 
 
 INSTALLED_APPS = [
@@ -74,7 +84,7 @@ DATABASES = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.getenv("DB_NAME", "colegio"),
         "USER": os.getenv("DB_USER", "postgres"),
-        "PASSWORD": os.getenv("DB_PASSWORD", "developer"),
+        "PASSWORD": os.getenv("DB_PASSWORD", ""),
         "HOST": os.getenv("DB_HOST", "localhost"),
         "PORT": os.getenv("DB_PORT", "5432"),
     }
@@ -121,6 +131,14 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),   # una jornada escolar
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
 }
+
+# Producción (DEBUG apagado): cookies solo por HTTPS y cabeceras de seguridad.
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"
 
 # React (Vite usa el puerto 5173)
 CORS_ALLOWED_ORIGINS = os.getenv(

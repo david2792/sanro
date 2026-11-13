@@ -71,6 +71,16 @@ export function descartarPendiente(uuid: string) {
   escribir(leer().filter((x) => x.body.uuid !== uuid))
 }
 
+/** Cantidad de listas que todavía no llegaron al servidor. */
+export function cantidadPendientes() {
+  return leer().length
+}
+
+/** Vacía la cola (solo al cerrar sesión a propósito, después de confirmar). */
+export function descartarTodo() {
+  escribir([])
+}
+
 window.addEventListener('online', () => void sincronizar())
 setInterval(() => {
   if (leer().length) void sincronizar()

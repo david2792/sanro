@@ -51,6 +51,20 @@ export const tokens = {
   },
 }
 
+/** Borra las respuestas guardadas para usar sin señal (datos de alumnos, planillas...). */
+export function borrarCacheLocal() {
+  try {
+    const claves: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k?.startsWith('cache:')) claves.push(k)
+    }
+    claves.forEach((k) => localStorage.removeItem(k))
+  } catch {
+    /* sin almacenamiento: no hay nada que borrar */
+  }
+}
+
 let renovando: Promise<boolean> | null = null
 async function renovarToken(): Promise<boolean> {
   if (!tokens.refresh) return false
