@@ -111,11 +111,20 @@ class PrincipiosTest(Base):
         self.assertEqual(set(r[0]), {"matricula", "alumno", "seccion", "tutores"})
         self.assertEqual(self.client.get("/api/aportes/familias/?q=Be").data, [])  # mínimo 3 letras
 
-    def test_la_ace_opera_la_direccion_solo_consulta(self):
-        self.login(self.director)
-        self.assertEqual(self.client.get("/api/aportes/panel/").status_code, 200)
-        self.assertEqual(self.emitir().status_code, 403)
+    def test_ace_direccion_y_secretaria_operan_con_registro_de_quien(self):
         self.login(self.secretaria)
+        r = self.emitir()
+        self.assertEqual((r.status_code, r.data["registrado_por"]), (201, self.secretaria.id))
+        self.login(self.director)
+        a = self.client.post(f"/api/aportes/recibos/{r.data['id']}/anular/", {"motivo": "Monto mal cargado"})
+        self.assertEqual((a.data["anulado_por"], a.data["anulado_por_nombre"]), (self.director.id, "director"))
+        hist = self.client.get(f"/api/aportes/recibos/{r.data['id']}/historial/").data
+        quienes = {(h["accion"], h["usuario_nombre"]) for h in hist}
+        self.assertIn(("CREAR", "secre"), quienes)
+        self.assertIn(("MODIFICAR", "director"), quienes)
+        # Coordinación y docentes no acceden.
+        coord = Usuario.objects.create_user("coord", password="x", rol="COORDINADOR")
+        self.login(coord)
         self.assertEqual(self.client.get("/api/aportes/panel/").status_code, 403)
 
     def test_matricular_no_depende_de_aportes(self):

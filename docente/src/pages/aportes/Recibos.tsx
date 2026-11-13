@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { Boton, Cargando, Encabezado, ErrorCaja, Etiqueta, Hoja, Input, Segmentado, Tarjeta, Vacio, useAviso } from '../../components/ui'
 import { api } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
-import { fechaCorta, guaranies } from '../../lib/utils'
+import { fechaCorta, fechaHora, guaranies } from '../../lib/utils'
 import { AportesNav, ESTADO_RECIBO, numeroRecibo, Recibo } from './comun'
 
 export default function Recibos() {
@@ -52,6 +52,28 @@ export default function Recibos() {
   )
 }
 
+const ACCION: Record<string, string> = { CREAR: 'Emitió', MODIFICAR: 'Modificó', DESCARGAR: 'Descargó' }
+
+/** Quién hizo qué con el recibo (auditoría). */
+function Historial({ recibo }: { recibo: number }) {
+  const h = useQuery({ queryKey: ['recibo-historial', recibo], queryFn: () => api<any[]>(`/aportes/recibos/${recibo}/historial/`) })
+  const propios = (h.data ?? []).filter((x) => x.modelo === 'aportes.recibo')
+  if (!propios.length) return null
+  return (
+    <div className="no-imprimir mt-4 border-t border-grafito-100 pt-3 text-sm">
+      <p className="mb-1 font-bold">Historial</p>
+      <ul className="space-y-1">
+        {propios.map((x) => (
+          <li key={x.id}>
+            <strong>{fechaHora(x.fecha)}</strong> · {ACCION[x.accion] ?? x.accion_nombre} <strong>{x.usuario_nombre || 'sistema'}</strong>
+            {x.cambios?.estado && ` · ${x.cambios.estado[1].toLowerCase()}`}{x.motivo && ` · ${x.motivo}`}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function DetalleRecibo({ recibo, onCerrar }: { recibo: any; onCerrar: () => void }) {
   const qc = useQueryClient()
   const avisar = useAviso()
@@ -90,6 +112,7 @@ function DetalleRecibo({ recibo, onCerrar }: { recibo: any; onCerrar: () => void
       </div>
     }>
       <Recibo recibo={recibo} />
+      <Historial recibo={recibo.id} />
     </Hoja>
   )
 }

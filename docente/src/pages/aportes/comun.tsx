@@ -97,7 +97,8 @@ export function Recibo({ recibo: r }: { recibo: any }) {
       </table>
       <p className="mt-2 text-sm">Son: <span className="font-bold">{r.importe_letras}</span>.</p>
       {r.observacion && <p className="mt-1 text-sm text-grafito-500">Obs.: {r.observacion}</p>}
-      {cerrado && <p className="mt-2 text-sm font-bold text-ausente">{ESTADO_RECIBO[r.estado]?.texto}: {r.motivo_anulacion}</p>}
+      {cerrado && <p className="mt-2 text-sm font-bold text-ausente">{ESTADO_RECIBO[r.estado]?.texto}: {r.motivo_anulacion}
+        {r.anulado_por_nombre && <span className="font-normal"> ({r.anulado_por_nombre})</span>}</p>}
       <div className="mt-12 flex items-end justify-between gap-4 text-xs text-grafito-500">
         <span>Registró: {r.registrado_por_nombre ?? '—'}<br />Código de verificación: <strong>{r.codigo_verificacion}</strong></span>
         <span className="w-44 border-t border-grafito pt-1 text-center text-grafito">Firma y sello de la ACE</span>

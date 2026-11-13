@@ -42,7 +42,7 @@ Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de ac
 - ✅ Recibos de la ACE a nombre del aportante; serie y ejercicio; importe en letras; código de verificación;
   anulación y reversión con motivo; "no válido como factura".
 - ✅ Panel y rendición de lo recaudado, sin listas de familias que no aportaron.
-- ✅ La ACE opera; la dirección solo consulta.
+- ✅ Operan la ACE, la dirección y la secretaría, con registro de quién emitió o anuló cada recibo (decisión 0012).
 - Recibo en borrador (plan 14.6) y ejercicio contable propio de la ACE: pasan a la fase de tesorería.
 
 ## Fase 3 — Evaluación y RSA ⬜

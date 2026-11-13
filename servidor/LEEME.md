@@ -85,7 +85,7 @@ En la planilla cuenta el mayor entre `puntaje` y `recuperatorio`; `marcas` indic
 Los campos de puntaje que no se envían se conservan (enviar solo `puntaje` no borra el recuperatorio).
 
 ## Aportes voluntarios a la ACE
-La comisión de la ACE (rol ACES) opera; la dirección solo consulta. Montos en guaraníes, sin decimales.
+Operan la comisión de la ACE (rol ACES), la dirección y la secretaría; todo queda registrado con quién lo hizo. Montos en guaraníes, sin decimales.
 Los aportes son voluntarios: no hay cuotas, vencimientos, deuda ni morosos (docs/decisiones/0011).
 | Uso | Método y URL |
 |---|---|
@@ -132,7 +132,7 @@ Si no hay ninguna, el sistema no inventa un valor: responde 404. Ver `docs/decis
 - DIRECTOR, COORDINADOR, SECRETARIA: administran todo.
 - DOCENTE: consulta datos y solo llama lista en sus propias clases.
 - TUTOR: reservado para el portal de padres (fase 3).
-- ACES: solo el módulo de aportes (opera); no ve asistencia, notas ni legajos. La dirección consulta los aportes sin modificarlos.
+- ACES: solo el módulo de aportes; no ve asistencia, notas ni legajos. Dirección y secretaría también operan los aportes.
 
 ## Pruebas
 `python manage.py test`

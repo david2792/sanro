@@ -115,6 +115,18 @@ class ReciboViewSet(PorInstitucionMixin, FiltroParamsMixin, mixins.CreateModelMi
         recibo = cerrar_recibo(self.get_object(), request.user, Recibo.Estado.REVERTIDO, request.data.get("motivo"))
         return Response(self.get_serializer(recibo).data)
 
+    @action(detail=True)
+    def historial(self, request, pk=None):
+        """Quién emitió, anuló o revirtió el recibo, cuándo y por qué (auditoría)."""
+        from nucleo.models import RegistroAuditoria
+        from nucleo.views import RegistroAuditoriaSerializer
+
+        recibo = self.get_object()
+        lineas = [str(i) for i in recibo.lineas.values_list("id", flat=True)]
+        qs = RegistroAuditoria.objects.filter(
+            Q(modelo="aportes.recibo", objeto_id=str(recibo.id)) | Q(modelo="aportes.linearecibo", objeto_id__in=lineas))
+        return Response(RegistroAuditoriaSerializer(qs, many=True).data)
+
 
 @api_view(["GET"])
 @permission_classes([PermisoACE])

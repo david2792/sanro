@@ -27,14 +27,12 @@ class GestionEscribePersonalLee(BasePermission):
 
 class PermisoACE(BasePermission):
     """
-    La ACE administra sus fondos; la institución no (plan maestro 2.4).
-    Comisión de la ACE (y superusuario): todo. Dirección: solo consulta, por transparencia.
+    Aportes a la ACE (docs/decisiones/0012): los operan la comisión de la ACE, la dirección y la secretaría.
+    Todo queda registrado con quién lo hizo (auditoría, registrado_por, anulado_por).
     """
 
     def has_permission(self, request, view):
         u = request.user
         if not (u and u.is_authenticated):
             return False
-        if u.is_superuser or u.es_aces:
-            return True
-        return request.method in SAFE_METHODS and u.rol == u.Rol.DIRECTOR
+        return u.is_superuser or u.es_aces or u.rol in (u.Rol.DIRECTOR, u.Rol.SECRETARIA)

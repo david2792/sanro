@@ -20,9 +20,9 @@ type Ctx = {
   cargando: boolean
   esGestion: boolean
   esDocente: boolean
-  /** Ve los aportes a la ACE: la comisión de la ACE (opera) y la dirección (solo consulta). */
+  /** Ve los aportes a la ACE. */
   veAportes: boolean
-  /** Emite y anula recibos y configura la ACE: solo la comisión de la ACE (plan maestro 2.4). */
+  /** Emite y anula recibos y configura la ACE: comisión de la ACE, dirección y secretaría (decisión 0012). */
   operaAportes: boolean
   entrar: (username: string, password: string) => Promise<void>
   salir: () => void
@@ -102,8 +102,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const rol = usuario?.rol
   const esGestion = !!usuario?.is_superuser || rol === 'DIRECTOR' || rol === 'COORDINADOR' || rol === 'SECRETARIA'
   const esDocente = !!usuario?.docente_id
-  const operaAportes = !!usuario?.is_superuser || rol === 'ACES'
-  const veAportes = operaAportes || rol === 'DIRECTOR'
+  const operaAportes = !!usuario?.is_superuser || rol === 'ACES' || rol === 'DIRECTOR' || rol === 'SECRETARIA'
+  const veAportes = operaAportes
 
   return (
     <AuthCtx.Provider value={{ usuario, cargando, esGestion, esDocente, veAportes, operaAportes, entrar, salir }}>{children}</AuthCtx.Provider>

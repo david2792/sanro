@@ -69,6 +69,7 @@ class ReciboSerializer(serializers.ModelSerializer):
     ace_ruc = serializers.CharField(source="ace.ruc", read_only=True)
     alumno = serializers.CharField(source="matricula.alumno.__str__", read_only=True, default=None)
     registrado_por_nombre = serializers.CharField(source="registrado_por.__str__", read_only=True, default=None)
+    anulado_por_nombre = serializers.CharField(source="anulado_por.__str__", read_only=True, default=None)
     leyenda = serializers.SerializerMethodField()
 
     class Meta:
