@@ -46,6 +46,8 @@ INSTALLED_APPS = [
     'asistencia',
     'pedagogico',
     'aportes',
+    # Va al final: conecta la auditoría a los modelos de las apps anteriores.
+    'nucleo',
 ]
 
 MIDDLEWARE = [
@@ -55,6 +57,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'nucleo.middleware.AuditoriaMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

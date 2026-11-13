@@ -1,5 +1,3 @@
-from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
@@ -8,6 +6,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from academico import views as acad
 from aportes import views as apor
 from asistencia import views as asis
+from nucleo import views as nucl
+from nucleo.archivos import descargar_archivo
 from pedagogico import views as peda
 from personas import views as pers
 
@@ -73,5 +73,8 @@ urlpatterns = [
     path("api/ficha/", peda.ficha),
     path("api/planificacion/control/", peda.control_planificacion),
     path("api/evaluaciones/", peda.evaluaciones_seccion),
+    # Núcleo: auditoría y archivos privados (/media/ ya no se publica: ver docs/decisiones/0005).
+    path("api/auditoria/", nucl.AuditoriaLista.as_view()),
+    path("api/archivos/<str:firma>/", descargar_archivo, name="descargar_archivo"),
     path("api/", include(router.urls)),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+]

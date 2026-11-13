@@ -13,8 +13,10 @@ App `nucleo` con el modelo `RegistroAuditoria`: institución, usuario, fecha, ac
 (`{campo: [antes, después]}`), motivo e IP.
 
 - Señales `pre_save`, `post_save` y `post_delete` sobre todos los modelos de las apps del sistema.
-- El usuario se toma de una variable de contexto que fijan las clases de autenticación de DRF
-  (`nucleo.autenticacion`) y un middleware para el admin.
+- El usuario se toma de una variable de contexto (`nucleo.contexto`). La abre
+  `nucleo.middleware.AuditoriaMiddleware` en cada petición (usuario de sesión, p. ej. el admin) y la
+  actualiza cada vista de DRF apenas autentica el JWT (envoltura de `APIView.initial` en `NucleoConfig.ready`).
+- Cambios hechos fuera de una petición (comandos, migraciones) quedan con usuario vacío = "sistema".
 - El motivo se envía en la cabecera `X-Motivo` (obligatorio en correcciones a partir de la Fase 1).
 - No se guardan contraseñas ni campos técnicos (`password`, `last_login`, marcas de tiempo automáticas).
 - El registro es de solo lectura: sin edición ni borrado por API ni admin.
