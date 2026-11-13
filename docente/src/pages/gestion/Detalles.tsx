@@ -84,8 +84,8 @@ export function AlumnoDetalle() {
   const alumno = useQuery({ queryKey: ['alumno', id], queryFn: () => api(`/alumnos/${id}/`) })
   const asistencia = useQuery({ queryKey: ['alumno-asistencia', id], queryFn: () => api(`/alumnos/${id}/asistencia/`), enabled: tab === 'asistencia' })
   const anecdoticos = useQuery({ queryKey: ['alumno-anec', id], queryFn: () => api(`/anecdoticos/?alumnos__alumno=${id}&page_size=200`), enabled: tab === 'anecdotico' })
-  const instituto = useQuery({ queryKey: ['institucion'], queryFn: () => api('/instituciones/') })
-  const minimo = instituto.data?.results?.[0]?.asistencia_minima ?? 80
+  // El servidor envía el mínimo de la institución junto con la asistencia.
+  const minimo: number = asistencia.data?.minimo
 
   if (alumno.isLoading) return <Cargando />
   if (alumno.error) return <ErrorCaja error={alumno.error} />

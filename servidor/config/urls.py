@@ -7,6 +7,7 @@ from academico import views as acad
 from aportes import views as apor
 from asistencia import views as asis
 from nucleo import views as nucl
+from normativa import views as norm
 from nucleo.archivos import descargar_archivo
 from pedagogico import views as peda
 from personas import views as pers
@@ -49,6 +50,10 @@ router.register("instrumentos", peda.InstrumentoViewSet)
 router.register("aportes/conceptos", apor.ConceptoAporteViewSet)
 router.register("aportes/exoneraciones", apor.ExoneracionViewSet)
 router.register("aportes/pagos", apor.PagoViewSet)
+# Registro normativo
+router.register("normativa/fuentes", norm.FuenteNormativaViewSet)
+router.register("normativa/reglas", norm.ReglaNormativaViewSet)
+router.register("normativa/versiones", norm.VersionReglaViewSet)
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -75,6 +80,7 @@ urlpatterns = [
     path("api/evaluaciones/", peda.evaluaciones_seccion),
     # Núcleo: auditoría y archivos privados (/media/ ya no se publica: ver docs/decisiones/0005).
     path("api/auditoria/", nucl.AuditoriaLista.as_view()),
+    path("api/normativa/resolver/", norm.resolver),
     path("api/archivos/<str:firma>/", descargar_archivo, name="descargar_archivo"),
     path("api/", include(router.urls)),
 ]

@@ -42,7 +42,8 @@ class AlumnoViewSet(PorInstitucionMixin, viewsets.ModelViewSet):
         minimo = institucion_de(request).asistencia_minima
         qs = Matricula.objects.filter(alumno=alumno, anio_lectivo__activo=True)
         filas = resumen_asistencia(qs, minimo)
-        return Response(filas[0] if filas else {})
+        # El mínimo viaja con el dato: la interfaz no repite el valor de la institución.
+        return Response({**(filas[0] if filas else {}), "minimo": minimo})
 
 
 class TutorViewSet(PorInstitucionMixin, viewsets.ModelViewSet):

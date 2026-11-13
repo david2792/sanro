@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'asistencia',
     'pedagogico',
     'aportes',
+    'normativa',
     # Va al final: conecta la auditoría a los modelos de las apps anteriores.
     'nucleo',
 ]
