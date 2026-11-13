@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 from academico.models import (AnioLectivo, Asignacion, Curso, Institucion, Materia, Matricula,
                               Nivel, Seccion)
 from personas.models import Alumno, Docente, Usuario
-from .models import RegistroAsistencia, SesionClase
+from .models import AusenciaJustificada, RegistroAsistencia, SesionClase
 
 
 class FlujoAsistenciaTest(APITestCase):
@@ -72,13 +72,15 @@ class FlujoAsistenciaTest(APITestCase):
         self.assertEqual((regs[m2]["hora_llegada"], regs[m2]["minutos_tarde"]), ("07:18:00", 18))
         self.assertIsNone(regs[m1]["hora_llegada"])
         del body["registros"][0]["hora_llegada"]
-        # El docente también marca ausencias justificadas, con su motivo.
+        # El docente marca "ausente con aviso" (la vieja "J"): queda ausente y con un justificativo pendiente.
         j = self.client.post("/api/sesiones/", {"asignacion": self.asig.id, "fecha": "2027-03-05", "registros": [
             {"matricula": m1, "estado": "J", "observacion": "Certificado médico"},
             {"matricula": m2, "estado": "P"}]}, format="json")
         regs = {x["matricula"]: x for x in j.data["registros"]}
-        self.assertEqual((regs[m1]["estado"], regs[m1]["observacion"]), ("J", "Certificado médico"))
+        self.assertEqual((regs[m1]["estado"], regs[m1]["observacion"]), ("A", "Certificado médico"))
+        self.assertEqual((regs[m1]["justificada"], regs[m1]["justificacion_estado"]), (False, "PRESENTADO"))
         # Limpieza de la prueba: las marcas están protegidas (decisión 0007), se quitan explícitamente primero.
+        AusenciaJustificada.objects.filter(registro__sesion_id=j.data["id"]).delete()
         RegistroAsistencia.objects.filter(sesion_id=j.data["id"]).delete()
         SesionClase.objects.filter(pk=j.data["id"]).delete()
         # Otro día, m2 ausente
@@ -113,8 +115,14 @@ class FlujoAsistenciaTest(APITestCase):
         j = self.client.post("/api/justificaciones/", {"matricula": m2, "fecha_desde": "2027-03-03",
                                                        "fecha_hasta": "2027-03-03", "motivo": "Reposo"})
         self.assertEqual(j.status_code, 201, j.data)
+        self.assertEqual(j.data["estado"], "PRESENTADO")
+        # Cargarlo no justifica nada: hace falta la decisión de gestión.
         fila2 = self.client.get(f"/api/alumnos/{ids[1].data['alumno']}/asistencia/").data
-        self.assertEqual(fila2["justificadas"], 1)
+        self.assertEqual(fila2["justificadas"], 0)
+        d = self.client.post(f"/api/justificaciones/{j.data['id']}/decidir/", {"decision": "APROBADO"})
+        self.assertEqual((d.status_code, d.data["estado"]), (200, "APROBADO"))
+        fila2 = self.client.get(f"/api/alumnos/{ids[1].data['alumno']}/asistencia/").data
+        self.assertEqual((fila2["justificadas"], fila2["ausentes"]), (1, 0))
         dia = self.client.get("/api/reportes/resumen-dia/?fecha=2027-03-02").data
         print("dia:", dia)
         self.assertEqual(dia["docentes_con_clase"], ["Gómez, Ana"])

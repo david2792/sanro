@@ -129,8 +129,13 @@ class AportesTest(APITestCase):
     def test_reporte_ausencias(self):
         hoy = date.today()
         s = SesionClase.objects.create(asignacion=self.asig, docente=self.asig.docente, fecha=hoy)
-        for m, est in zip(self.m, "PAJ"):
+        for m, est in zip(self.m, "PAA"):
             RegistroAsistencia.objects.create(sesion=s, matricula=m, estado=est)
+        # La tercera ausencia tiene un justificativo aprobado (la ausencia sigue siendo "A").
+        from asistencia import justificaciones as tramite
+        from asistencia.models import Justificacion
+        j = Justificacion.objects.create(matricula=self.m[2], fecha_desde=hoy, fecha_hasta=hoy, motivo="Reposo")
+        tramite.decidir(j, self.director, "APROBADO")
         self.login(self.director)
         r = self.client.get("/api/reportes/ausencias/")
         self.assertEqual(r.status_code, 200, r.data)

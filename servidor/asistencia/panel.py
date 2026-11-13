@@ -42,10 +42,12 @@ class Datos:
         }
 
         # Asistencia: un registro por alumno y clase.
-        self.registros = list(
-            RegistroAsistencia.objects.filter(sesion__asignacion__seccion__anio_lectivo=self.anio)
-            .values_list("matricula_id", "estado", "sesion__fecha", "sesion__asignacion_id")
-        )
+        self.registros = [
+            (mat, "J" if est == "A" and just else est, fecha, asig)  # "J": ausencia con justificativo aprobado
+            for mat, est, just, fecha, asig in RegistroAsistencia.objects.filter(
+                sesion__asignacion__seccion__anio_lectivo=self.anio)
+            .values_list("matricula_id", "estado", "justificada", "sesion__fecha", "sesion__asignacion_id")
+        ]
 
         # Trabajos: solo cuentan los que ya tienen al menos un puntaje cargado.
         self.instrumentos = {

@@ -12,3 +12,4 @@ Una decisión no se edita: si cambia, se escribe una nueva que la sustituye.
 | [0005](0005-archivos-privados.md) | Archivos privados con enlaces firmados | Aceptada |
 | [0006](0006-registro-normativo.md) | Registro normativo versionado | Aceptada |
 | [0007](0007-sin-borrados-fisicos.md) | Sin borrados físicos de registros académicos y financieros | Aceptada |
+| [0008](0008-justificativos.md) | Justificativos como trámite; la ausencia no se reemplaza | Aceptada |

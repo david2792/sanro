@@ -333,7 +333,7 @@ export const REFERENCIALES: Record<string, CrudConfig> = {
   },
   justificaciones: {
     titulo: 'Justificaciones', singular: 'Justificación', femenino: true, ruta: '/justificaciones/',
-    descripcion: 'Al guardar, las ausencias de esas fechas pasan a justificadas.',
+    descripcion: 'Se presentan, se revisan y se deciden. Las ausencias no se borran: quedan justificadas al aprobarse.',
     columnas: [
       { label: 'Alumno', valor: (o) => o.alumno, principal: true },
       { label: 'Fechas', valor: (o) => `${fechaCorta(o.fecha_desde)} al ${fechaCorta(o.fecha_hasta)}` },
@@ -343,10 +343,12 @@ export const REFERENCIALES: Record<string, CrudConfig> = {
       { name: 'matricula', label: 'Alumno', tipo: 'fk', fk: FK.matricula, requerido: true },
       { name: 'fecha_desde', label: 'Desde', tipo: 'fecha', requerido: true, medio: true },
       { name: 'fecha_hasta', label: 'Hasta', tipo: 'fecha', requerido: true, medio: true },
-      { name: 'motivo', label: 'Motivo', requerido: true },
+      { name: 'presentado_por', label: 'Presentado por', ayuda: 'Ej.: la madre, el padre, el tutor.' },
+      { name: 'fecha_presentacion', label: 'Fecha de presentación', tipo: 'fecha', requerido: true },
+      { name: 'motivo', label: 'Motivo', requerido: true, ayuda: 'Motivo general. No escribas diagnósticos médicos.' },
       { name: 'adjunto', label: 'Certificado o nota (foto o PDF)', tipo: 'archivo' },
     ],
-    inicial: () => ({ fecha_desde: hoyISO(), fecha_hasta: hoyISO() }),
+    inicial: () => ({ fecha_desde: hoyISO(), fecha_hasta: hoyISO(), fecha_presentacion: hoyISO() }),
   },
   permisos: {
     titulo: 'Permisos docentes', singular: 'Permiso', ruta: '/permisos-docentes/',

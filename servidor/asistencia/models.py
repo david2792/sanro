@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from academico.models import Asignacion, Matricula
 from personas.models import Docente
@@ -44,11 +45,13 @@ class RegistroAsistencia(models.Model):
         PRESENTE = "P", "Presente"
         AUSENTE = "A", "Ausente"
         TARDANZA = "T", "Llegada tardía"
-        JUSTIFICADO = "J", "Ausencia justificada"
 
     sesion = models.ForeignKey(SesionClase, on_delete=models.PROTECT, related_name="registros")
     matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="asistencias")
     estado = models.CharField(max_length=1, choices=Estado.choices, default=Estado.PRESENTE)
+    # La justificación es un proceso aparte (Justificacion): la ausencia sigue siendo "A".
+    # Esta marca la mantiene asistencia.justificaciones.recalcular() según los justificativos aprobados.
+    justificada = models.BooleanField(default=False, editable=False)
     hora_llegada = models.TimeField("Hora de llegada", null=True, blank=True, help_text="Solo en llegadas tardías.")
     observacion = models.CharField(max_length=200, blank=True)
 
@@ -70,37 +73,77 @@ class RegistroAsistencia(models.Model):
 
 
 class Justificacion(models.Model):
-    """Justificativo de ausencia (certificado médico, nota del tutor) por rango de fechas."""
+    """
+    Justificativo de ausencias (plan maestro, módulo 5). Es un trámite con estados: se presenta, se revisa
+    y se decide. No reemplaza la ausencia: las ausencias aprobadas quedan marcadas como justificadas.
+    Nunca se aprueba solo por tener un archivo adjunto.
+    """
+
+    class Estado(models.TextChoices):
+        BORRADOR = "BORRADOR", "Borrador"
+        PRESENTADO = "PRESENTADO", "Presentado"
+        EN_REVISION = "EN_REVISION", "En revisión"
+        REQUIERE_INFO = "REQUIERE_INFO", "Falta documentación"
+        APROBADO = "APROBADO", "Aprobado"
+        APROBADO_PARCIAL = "APROBADO_PARCIAL", "Aprobado en parte"
+        RECHAZADO = "RECHAZADO", "Rechazado"
+        CANCELADO = "CANCELADO", "Cancelado"
+
+    class Origen(models.TextChoices):
+        GESTION = "GESTION", "Presentado en secretaría"
+        DOCENTE = "DOCENTE", "Aviso recibido por el docente en clase"
+        FAMILIA = "FAMILIA", "Presentado por la familia"
+
+    ABIERTOS = (Estado.BORRADOR, Estado.PRESENTADO, Estado.EN_REVISION, Estado.REQUIERE_INFO)
+    APROBADOS = (Estado.APROBADO, Estado.APROBADO_PARCIAL)
 
     matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="justificaciones")
-    fecha_desde = models.DateField()
-    fecha_hasta = models.DateField()
-    motivo = models.CharField(max_length=200)
+    fecha_desde = models.DateField("Ausencias desde")
+    fecha_hasta = models.DateField("Ausencias hasta")
+    fecha_presentacion = models.DateField("Fecha de presentación", default=timezone.localdate)
+    presentado_por = models.CharField("Presentado por", max_length=120, blank=True,
+                                      help_text="Quién entregó el justificativo, ej. la madre.")
+    origen = models.CharField(max_length=8, choices=Origen.choices, default=Origen.GESTION)
+    motivo = models.CharField(max_length=200, help_text="Motivo general. No escribir diagnósticos médicos.")
     adjunto = models.FileField(upload_to="justificaciones/%Y/", null=True, blank=True)
+    estado = models.CharField(max_length=16, choices=Estado.choices, default=Estado.PRESENTADO)
+    revisado_por = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name="+")
+    decidido_en = models.DateTimeField(null=True, blank=True)
+    motivo_decision = models.CharField("Motivo de la decisión", max_length=250, blank=True)
+    ausencias = models.ManyToManyField(RegistroAsistencia, through="AusenciaJustificada", related_name="justificaciones")
     registrado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"
     )
     creado = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["-fecha_desde"]
+        ordering = ["-fecha_presentacion", "-id"]
         verbose_name = "justificación"
         verbose_name_plural = "justificaciones"
 
-    def aplicar(self):
-        """Marca como justificadas las ausencias del rango. Devuelve cuántas cambió."""
-        return RegistroAsistencia.objects.filter(
-            matricula=self.matricula,
-            sesion__fecha__range=(self.fecha_desde, self.fecha_hasta),
-            estado=RegistroAsistencia.Estado.AUSENTE,
-        ).update(estado=RegistroAsistencia.Estado.JUSTIFICADO)
-
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        self.aplicar()
+    @property
+    def abierto(self):
+        return self.estado in self.ABIERTOS
 
     def __str__(self):
-        return f"{self.matricula.alumno} {self.fecha_desde}–{self.fecha_hasta}"
+        return f"{self.matricula.alumno} {self.fecha_desde}–{self.fecha_hasta} ({self.get_estado_display()})"
+
+
+class AusenciaJustificada(models.Model):
+    """Cada ausencia que abarca un justificativo, con la decisión sobre ella (permite aprobar en parte)."""
+
+    justificacion = models.ForeignKey(Justificacion, on_delete=models.PROTECT, related_name="vinculos")
+    registro = models.ForeignKey(RegistroAsistencia, on_delete=models.PROTECT, related_name="vinculos_justificacion")
+    aprobada = models.BooleanField(null=True, help_text="Vacío: todavía sin decidir.")
+
+    class Meta:
+        unique_together = ("justificacion", "registro")
+        verbose_name = "ausencia justificada"
+        verbose_name_plural = "ausencias justificadas"
+
+    def __str__(self):
+        return f"{self.justificacion_id} → {self.registro_id} ({self.aprobada})"
 
 
 class PermisoDocente(models.Model):

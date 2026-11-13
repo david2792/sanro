@@ -669,11 +669,12 @@ def frases(request):
 # ---------------------------------------------------------------------------
 
 def resumen_registros(qs):
-    c = {e: n for e, n in qs.values_list("estado").annotate(n=Count("id"))}
+    c = {(e, j): n for e, j, n in qs.values_list("estado", "justificada").annotate(n=Count("id"))}
     total = sum(c.values())
-    presentes = c.get("P", 0) + c.get("T", 0)
-    return {"clases": total, "presentes": presentes, "ausentes": c.get("A", 0), "tardanzas": c.get("T", 0),
-            "justificadas": c.get("J", 0), "porcentaje": round(presentes * 100 / total, 1) if total else None}
+    presentes = sum(n for (e, _), n in c.items() if e in ("P", "T"))
+    return {"clases": total, "presentes": presentes, "ausentes": c.get(("A", False), 0),
+            "tardanzas": sum(n for (e, _), n in c.items() if e == "T"),
+            "justificadas": c.get(("A", True), 0), "porcentaje": round(presentes * 100 / total, 1) if total else None}
 
 
 @api_view(["GET"])
@@ -698,8 +699,9 @@ def ficha(request):
     inst = institucion_de(request)
 
     registros = RegistroAsistencia.objects.filter(matricula=m)
-    faltas = (registros.filter(sesion__asignacion=asignacion, estado__in=["A", "J"])
-              .order_by("-sesion__fecha").values("sesion__fecha", "estado")[:5])
+    faltas = [{"sesion__fecha": f["sesion__fecha"], "estado": "J" if f["justificada"] else "A"}
+              for f in registros.filter(sesion__asignacion=asignacion, estado="A")
+              .order_by("-sesion__fecha").values("sesion__fecha", "justificada")[:5]]
 
     puntajes = {p.instrumento_id: p for p in Puntaje.objects.filter(matricula=m, instrumento__asignacion=asignacion)}
     vacio = Puntaje()

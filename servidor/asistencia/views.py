@@ -3,7 +3,7 @@ from datetime import date
 from django.db.models import Count, Q
 from django.db.models.functions import ExtractIsoWeekDay, TruncMonth
 from rest_framework import viewsets
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
@@ -12,6 +12,7 @@ from academico.views import FiltroParamsMixin
 from personas.models import Docente
 from nucleo.instituciones import PorInstitucionMixin, institucion_de
 from personas.permisos import EsGestion, EsPersonal
+from . import justificaciones as tramite
 from .models import Justificacion, PermisoDocente, RegistroAsistencia, SesionClase
 from .serializers import JustificacionSerializer, PermisoDocenteSerializer, SesionClaseSerializer
 
@@ -42,13 +43,46 @@ class SesionClaseViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelV
 
 class JustificacionViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
     campo_institucion = "matricula__anio_lectivo__institucion"
-    queryset = Justificacion.objects.select_related("matricula__alumno")
+    """
+    Trámite de justificativos (solo gestión). No se borran: se cancelan con motivo.
+    POST {id}/revisar/ · POST {id}/decidir/ {decision, motivo, aprobadas:[registros]} · POST {id}/cancelar/ {motivo}
+    """
+
+    queryset = Justificacion.objects.select_related("matricula__alumno", "matricula__seccion__curso", "revisado_por")
     serializer_class = JustificacionSerializer
     permission_classes = [EsGestion]
-    filtros = ["matricula", "matricula__alumno"]
+    filtros = ["matricula", "matricula__alumno", "estado", "origen"]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def perform_create(self, serializer):
-        serializer.save(registrado_por=self.request.user)
+        j = serializer.save(registrado_por=self.request.user)
+        tramite.vincular_ausencias(j)
+
+    def perform_update(self, serializer):
+        tramite.vincular_ausencias(serializer.save())
+
+    def _responder(self, j):
+        return Response(self.get_serializer(j).data)
+
+    @action(detail=True, methods=["post"])
+    def revisar(self, request, pk=None):
+        j = self.get_object()
+        if j.estado not in (Justificacion.Estado.PRESENTADO, Justificacion.Estado.REQUIERE_INFO):
+            raise ValidationError("Solo se pasan a revisión los justificativos presentados.")
+        j.estado = Justificacion.Estado.EN_REVISION
+        j.revisado_por = request.user
+        j.save()
+        return self._responder(j)
+
+    @action(detail=True, methods=["post"])
+    def decidir(self, request, pk=None):
+        d = request.data
+        j = tramite.decidir(self.get_object(), request.user, d.get("decision"), d.get("motivo", ""), d.get("aprobadas"))
+        return self._responder(j)
+
+    @action(detail=True, methods=["post"])
+    def cancelar(self, request, pk=None):
+        return self._responder(tramite.cancelar(self.get_object(), request.user, request.data.get("motivo", "")))
 
 
 class PermisoDocenteViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
@@ -148,8 +182,8 @@ def reporte_ausencias(request):
         regs = regs.filter(sesion__asignacion__seccion_id=p["seccion"])
     conteos = {
         "registros": Count("id"),
-        "ausentes": Count("id", filter=Q(estado="A")),
-        "justificadas": Count("id", filter=Q(estado="J")),
+        "ausentes": Count("id", filter=Q(estado="A", justificada=False)),
+        "justificadas": Count("id", filter=Q(estado="A", justificada=True)),
         "tardanzas": Count("id", filter=Q(estado="T")),
     }
 

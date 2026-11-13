@@ -22,6 +22,7 @@ const CursoDetalle = lazy(() => import('./pages/gestion/Detalles').then((m) => (
 const GestionInicio = lazy(() => import('./pages/gestion/Gestion').then((m) => ({ default: m.GestionInicio })))
 const RefPage = lazy(() => import('./pages/gestion/Gestion').then((m) => ({ default: m.RefPage })))
 const Ausencias = lazy(() => import('./pages/gestion/Ausencias'))
+const Justificativos = lazy(() => import('./pages/gestion/Justificativos'))
 const PanelAportes = lazy(() => import('./pages/aportes/Panel'))
 const Cobrar = lazy(() => import('./pages/aportes/Cobrar'))
 const SeccionAportes = lazy(() => import('./pages/aportes/Seccion'))
@@ -70,6 +71,7 @@ export default function App() {
                   <Route path="planificacion" element={<Protegida soloGestion><ControlPlanificacion /></Protegida>} />
                   <Route path="seguimiento/:id" element={<Protegida soloGestion><SeguimientoMateria /></Protegida>} />
                 <Route path="ref" element={<Protegida soloGestion><GestionInicio /></Protegida>} />
+                  <Route path="ref/justificaciones" element={<Protegida soloGestion><Justificativos /></Protegida>} />
                   <Route path="ref/:clave" element={<Protegida soloGestion><RefPage /></Protegida>} />
                   <Route path="ausencias" element={<Protegida soloGestion><Ausencias /></Protegida>} />
                   <Route path="aportes" element={<Protegida soloAportes><PanelAportes /></Protegida>} />

@@ -24,9 +24,10 @@ Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de ac
 - Mapear cada `Nivel`/`Especialidad` del colegio a las categorías del registro normativo
   (Tercer Ciclo / Media; Científico / Técnico) para resolver reglas automáticamente.
 
-## Fase 1 — Asistencia, justificativos y matrícula con historial ⬜
-- Justificativo como proceso aparte con estados (BORRADOR … APROBADO/RECHAZADO); la ausencia no se reemplaza.
-- Quitar el estado `J` de la marca de asistencia (migrar los datos existentes a justificativos aprobados).
+## Fase 1 — Asistencia, justificativos y matrícula con historial 🔄
+- ✅ 1.1 Justificativo como proceso aparte con estados; la ausencia no se reemplaza; aprobación parcial;
+  sin borrado (decisión 0008). Pantalla `Gestión › Justificativos`.
+- ✅ 1.1 Quitar el estado `J` de la marca de asistencia (datos existentes migrados a justificativos aprobados).
 - Asistencia con borrador y confirmación; correcciones de sesiones confirmadas con motivo obligatorio.
 - Anulación de sesiones de clase con motivo (en vez de borrar).
 - Retiro anticipado; origen de la marca (web, sin conexión, importación, corrección).

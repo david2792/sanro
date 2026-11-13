@@ -2,16 +2,31 @@ from django.db import transaction
 from rest_framework import serializers
 
 from academico.models import Matricula
+from . import justificaciones as tramite
 from .models import Justificacion, PermisoDocente, RegistroAsistencia, SesionClase
+
+# "J" ya no es un estado: los teléfonos que aún la envían (listas guardadas sin señal) la convierten
+# en ausencia + aviso del docente, que gestión revisa como justificativo.
+AVISO = "J"
+ESTADOS_LISTA = RegistroAsistencia.Estado.choices + [(AVISO, "Ausente con aviso (pasa a justificativo)")]
 
 
 class RegistroAsistenciaSerializer(serializers.ModelSerializer):
     alumno = serializers.CharField(source="matricula.alumno.__str__", read_only=True)
     minutos_tarde = serializers.IntegerField(read_only=True)
+    estado = serializers.ChoiceField(choices=ESTADOS_LISTA, default=RegistroAsistencia.Estado.PRESENTE)
+    justificada = serializers.BooleanField(read_only=True)
+    justificacion_estado = serializers.SerializerMethodField()
 
     class Meta:
         model = RegistroAsistencia
-        fields = ["id", "matricula", "alumno", "estado", "hora_llegada", "minutos_tarde", "observacion"]
+        fields = ["id", "matricula", "alumno", "estado", "justificada", "justificacion_estado", "hora_llegada",
+                  "minutos_tarde", "observacion"]
+
+    def get_justificacion_estado(self, obj):
+        """Estado del último justificativo que incluye esta ausencia (sin mostrar su motivo)."""
+        v = obj.vinculos_justificacion.select_related("justificacion").order_by("-justificacion_id").first()
+        return v.justificacion.estado if v else None
 
 
 class SesionClaseSerializer(serializers.ModelSerializer):
@@ -88,30 +103,57 @@ class SesionClaseSerializer(serializers.ModelSerializer):
         return sesion
 
     def _guardar_registros(self, sesion, registros):
+        usuario = self.context["request"].user
         for r in registros:
             estado = r.get("estado", "P")
-            RegistroAsistencia.objects.update_or_create(
+            observacion = r.get("observacion", "")
+            con_aviso = estado == AVISO
+            if con_aviso:
+                estado = RegistroAsistencia.Estado.AUSENTE
+            registro, _ = RegistroAsistencia.objects.update_or_create(
                 sesion=sesion, matricula=r["matricula"],
                 defaults={
                     "estado": estado,
                     # La hora de llegada solo tiene sentido en una tardanza.
                     "hora_llegada": r.get("hora_llegada") if estado == RegistroAsistencia.Estado.TARDANZA else None,
-                    "observacion": r.get("observacion", ""),
+                    "observacion": observacion,
                 },
             )
+            if con_aviso:
+                tramite.aviso_del_docente(registro, observacion.strip() or "Aviso de ausencia recibido en clase.", usuario)
+            else:
+                tramite.retirar_aviso_del_docente(registro, usuario)
+            tramite.recalcular(registro)
 
 
 class JustificacionSerializer(serializers.ModelSerializer):
     alumno = serializers.CharField(source="matricula.alumno.__str__", read_only=True)
+    seccion = serializers.CharField(source="matricula.seccion.__str__", read_only=True)
+    estado_nombre = serializers.CharField(source="get_estado_display", read_only=True)
+    origen_nombre = serializers.CharField(source="get_origen_display", read_only=True)
+    revisado_por_nombre = serializers.CharField(source="revisado_por.__str__", read_only=True, default=None)
+    detalle_ausencias = serializers.SerializerMethodField()
 
     class Meta:
         model = Justificacion
-        fields = "__all__"
-        read_only_fields = ["registrado_por"]
+        exclude = ["ausencias"]
+        read_only_fields = ["registrado_por", "estado", "origen", "revisado_por", "decidido_en", "motivo_decision"]
+
+    def get_detalle_ausencias(self, obj):
+        return [{
+            "registro": v.registro_id, "fecha": v.registro.sesion.fecha,
+            "materia": v.registro.sesion.asignacion.materia.nombre, "aprobada": v.aprobada,
+        } for v in obj.vinculos.select_related("registro__sesion__asignacion__materia").order_by("registro__sesion__fecha")]
 
     def validate(self, data):
-        if data["fecha_desde"] > data["fecha_hasta"]:
+        desde = data.get("fecha_desde", getattr(self.instance, "fecha_desde", None))
+        hasta = data.get("fecha_hasta", getattr(self.instance, "fecha_hasta", None))
+        if desde and hasta and desde > hasta:
             raise serializers.ValidationError("La fecha 'desde' no puede ser posterior a 'hasta'.")
+        if self.instance is not None and not self.instance.abierto:
+            raise serializers.ValidationError("Un justificativo ya decidido o cancelado no se modifica.")
+        if self.instance is not None and "matricula" in data and data["matricula"] != self.instance.matricula:
+            raise serializers.ValidationError({"matricula": "No se puede pasar el justificativo a otro alumno."})
         return data
 
 
@@ -131,8 +173,8 @@ def resumen_asistencia(matriculas_qs, minimo):
     qs = matriculas_qs.select_related("alumno").annotate(
         total=Count("asistencias"),
         presentes=Count("asistencias", filter=Q(asistencias__estado__in=["P", "T"])),
-        ausentes=Count("asistencias", filter=Q(asistencias__estado="A")),
-        justificadas=Count("asistencias", filter=Q(asistencias__estado="J")),
+        ausentes=Count("asistencias", filter=Q(asistencias__estado="A", asistencias__justificada=False)),
+        justificadas=Count("asistencias", filter=Q(asistencias__estado="A", asistencias__justificada=True)),
         tardanzas=Count("asistencias", filter=Q(asistencias__estado="T")),
     )
     for m in qs:

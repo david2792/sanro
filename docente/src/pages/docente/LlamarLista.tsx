@@ -14,10 +14,16 @@ const ESTILO: Record<Estado, { letra: string; nombre: string; circulo: string; t
   P: { letra: 'P', nombre: 'Presente', circulo: 'bg-presente text-white', texto: 'text-grafito' },
   A: { letra: 'A', nombre: 'Ausente', circulo: 'bg-ausente text-white', texto: 'text-ausente' },
   T: { letra: 'T', nombre: 'Llegó tarde', circulo: 'bg-tarde text-white', texto: 'text-tarde' },
-  J: { letra: 'J', nombre: 'Ausencia justificada', circulo: 'bg-justificado text-white', texto: 'text-justificado' },
+  // "J" en la lista = ausente con aviso: el servidor la guarda como ausencia y abre un justificativo
+  // que dirección o secretaría revisa (la ausencia no se borra).
+  J: { letra: 'J', nombre: 'Ausente con aviso', circulo: 'bg-justificado text-white', texto: 'text-justificado' },
 }
 // Un toque avanza al siguiente estado.
 const SIGUIENTE: Record<Estado, Estado> = { P: 'A', A: 'T', T: 'J', J: 'P' }
+
+// Estados de un justificativo que todavía cuentan como "aviso" en la lista.
+const AVISO_VIGENTE = ['BORRADOR', 'PRESENTADO', 'EN_REVISION', 'REQUIERE_INFO', 'APROBADO', 'APROBADO_PARCIAL']
+const conAviso = (r: any) => r.estado === 'J' || (r.estado === 'A' && AVISO_VIGENTE.includes(r.justificacion_estado))
 
 /** Minutos entre dos horas "HH:MM" (o "HH:MM:SS"); null si falta alguna. */
 function minutosEntre(desde?: string | null, hasta?: string | null) {
@@ -65,9 +71,9 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
     for (const a of alumnos.data) base[a.matricula] = 'P'
     const previo = pendiente?.body ?? existente.data
     for (const r of previo?.registros ?? []) {
-      base[r.matricula] = r.estado
+      base[r.matricula] = conAviso(r) ? 'J' : r.estado
       if (r.estado === 'T' && r.hora_llegada) llegadas[r.matricula] = r.hora_llegada.slice(0, 5)
-      if (r.estado === 'J' && r.observacion) razones[r.matricula] = r.observacion
+      if (conAviso(r) && r.observacion) razones[r.matricula] = r.observacion
     }
     setEstados(base)
     setHoras(llegadas)
@@ -233,7 +239,7 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
               onClick={() => setFiltro('J')}
               className={cn('rounded-md px-2 py-1 transition-colors', filtro === 'J' ? 'bg-justificado text-white' : 'text-grafito-500')}
             >
-              Justif. ({cuenta('J')})
+              Aviso ({cuenta('J')})
             </button>
           </div>
         </div>
@@ -249,7 +255,7 @@ export default function LlamarLista({ asignacion, fecha, onContinuar }: { asigna
           const motivo = e === 'J' ? motivos[a.matricula] ?? '' : ''
           const detalle = e === 'T' && llegada
             ? `Llegó ${llegada}${atraso ? ` · ${atraso} min tarde` : ''}`
-            : e === 'J' ? 'Justificada' : est.nombre
+            : e === 'J' ? 'Con aviso' : est.nombre
           return (
             <li key={a.matricula} className="flex h-16 items-center">
               <button
