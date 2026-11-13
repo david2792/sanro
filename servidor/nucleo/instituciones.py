@@ -8,6 +8,18 @@ Varias instituciones en un esquema compartido (docs/decisiones/0003-varias-insti
 """
 from . import contexto
 
+_tabla_lista = False
+
+
+def _tabla_existe(modelo):
+    """Django crea modelos en memoria antes de migrar (p. ej. los chequeos del sistema en una base vacía)."""
+    global _tabla_lista
+    if not _tabla_lista:
+        from django.db import connection
+
+        _tabla_lista = modelo._meta.db_table in connection.introspection.table_names()
+    return _tabla_lista
+
 
 def institucion_por_defecto():
     """Valor por defecto de la FK `institucion` (devuelve la clave)."""
@@ -16,6 +28,8 @@ def institucion_por_defecto():
     usuario = contexto.usuario_actual()
     if getattr(usuario, "institucion_id", None):
         return usuario.institucion_id
+    if not _tabla_existe(Institucion):
+        return None
     pk = Institucion.objects.order_by("pk").values_list("pk", flat=True).first()
     if pk is None:  # instalación nueva sin institución cargada
         pk = Institucion.objects.create(nombre="Institución").pk
