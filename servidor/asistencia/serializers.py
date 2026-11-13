@@ -2,6 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
+from academico.models import Matricula
 from nucleo import contexto
 from . import justificaciones as tramite
 from .models import Justificacion, PermisoDocente, RegistroAsistencia, SesionClase
@@ -77,11 +78,13 @@ class SesionClaseSerializer(serializers.ModelSerializer):
             docente = getattr(user, "docente", None)
             if docente is None or asignacion.docente_id != docente.id:
                 raise serializers.ValidationError("Solo podés llamar lista en tus propias clases.")
-        validas = set(asignacion.seccion.matriculas.values_list("id", flat=True))
+        # Solo alumnos que ese día cursaban en la sección (fecha de matrícula, bajas y cambios de sección).
+        fecha = data.get("fecha") or self.instance.fecha
+        validas = Matricula.en_seccion(asignacion.seccion_id, fecha)
         for r in data.get("registros", []):
             if r["matricula"].id not in validas:
                 raise serializers.ValidationError(
-                    f"La matrícula {r['matricula'].id} no pertenece a la sección de esta clase."
+                    f"{r['matricula'].alumno} no estaba matriculado en la sección de esta clase el {fecha:%d/%m/%Y}."
                 )
         return data
 

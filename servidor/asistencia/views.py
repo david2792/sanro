@@ -230,7 +230,7 @@ def reporte_ausencias(request):
         return d
 
     secciones = {s.id: s for s in Seccion.objects.filter(anio_lectivo=anio).select_related("curso__especialidad", "curso__nivel")}
-    inscriptos = dict(Matricula.objects.filter(anio_lectivo=anio, estado=Matricula.Estado.ACTIVA)
+    inscriptos = dict(Matricula.objects.filter(anio_lectivo=anio, estado__in=Matricula.EN_CURSO)
                       .values("seccion").annotate(n=Count("id")).values_list("seccion", "n"))
     por_seccion = []
     for f in regs.values("sesion__asignacion__seccion").annotate(

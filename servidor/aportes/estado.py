@@ -44,7 +44,7 @@ class EstadoAportes:
             Exoneracion.objects.filter(concepto__anio_lectivo=anio).values_list("matricula_id", "concepto_id"))
 
     def matriculas(self, **filtros):
-        return (Matricula.objects.filter(anio_lectivo=self.anio, estado=Matricula.Estado.ACTIVA, **filtros)
+        return (Matricula.objects.filter(anio_lectivo=self.anio, estado__in=Matricula.EN_CURSO, **filtros)
                 .select_related("alumno", "seccion__curso")
                 .order_by("seccion__curso__nivel__orden", "seccion__curso__grado", "seccion__letra",
                           "numero_lista", "alumno__apellidos", "alumno__nombres"))

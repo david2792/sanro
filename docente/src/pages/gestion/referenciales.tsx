@@ -19,12 +19,18 @@ export const ROLES = [
   { valor: 'ACES', label: 'ACES (cooperadora)' },
 ]
 export const ESTADOS_MATRICULA = [
-  { valor: 'ACTIVA', label: 'Activa' },
+  { valor: 'PREINSCRIPTO', label: 'Preinscripto' },
+  { valor: 'PENDIENTE_DOC', label: 'Pendiente de documentación' },
+  { valor: 'ACTIVA', label: 'Matriculado' },
   { valor: 'RETIRADO', label: 'Retirado' },
   { valor: 'TRASLADADO', label: 'Trasladado (pase)' },
   { valor: 'PROMOVIDO', label: 'Promovido' },
   { valor: 'REPROBADO', label: 'No promovido' },
+  { valor: 'EGRESADO', label: 'Egresado' },
+  { valor: 'ANULADA', label: 'Anulada (error de carga)' },
 ]
+// Bajas: piden fecha y motivo (el servidor también lo exige).
+const BAJAS_MATRICULA = ['RETIRADO', 'TRASLADADO', 'ANULADA']
 const TIPOS_PERMISO = [
   { valor: 'PERMISO', label: 'Permiso' },
   { valor: 'REPOSO', label: 'Reposo médico' },
@@ -316,17 +322,18 @@ export const REFERENCIALES: Record<string, CrudConfig> = {
       { label: 'Alumno', valor: (o) => o.alumno_nombre, principal: true },
       { label: 'Sección', valor: (o) => o.seccion_descripcion },
       { label: 'N°', valor: (o) => o.numero_lista ?? '', oculto_movil: true },
-      { label: 'Estado', valor: (o) => <Etiqueta tono={o.estado === 'ACTIVA' ? 'verde' : 'gris'}>{ESTADOS_MATRICULA.find((e) => e.valor === o.estado)?.label}</Etiqueta> },
+      { label: 'Estado', valor: (o) => <Etiqueta tono={o.estado === 'ACTIVA' ? 'verde' : o.estado === 'PENDIENTE_DOC' || o.estado === 'PREINSCRIPTO' ? 'ambar' : 'gris'}>{ESTADOS_MATRICULA.find((e) => e.valor === o.estado)?.label}</Etiqueta> },
     ],
     buscar: (o) => `${o.alumno_nombre} ${o.alumno_ci} ${o.seccion_descripcion}`,
     campos: [
       { name: 'alumno', label: 'Alumno', tipo: 'fk', fk: FK.alumno, requerido: true },
-      { name: 'seccion', label: 'Sección', tipo: 'fk', fk: FK.seccion, requerido: true },
+      { name: 'seccion', label: 'Sección', tipo: 'fk', fk: FK.seccion, requerido: true,
+        ayuda: 'Para pasar a un alumno a otra sección usá «Cambiar de sección» en su ficha (queda el historial).' },
       { name: 'numero_lista', label: 'N° de lista', tipo: 'numero', medio: true },
       { name: 'fecha', label: 'Fecha', tipo: 'fecha', requerido: true, medio: true },
       { name: 'estado', label: 'Estado', tipo: 'select', opciones: ESTADOS_MATRICULA, requerido: true },
-      { name: 'fecha_baja', label: 'Fecha de baja', tipo: 'fecha', medio: true, visible: (v) => v.estado && v.estado !== 'ACTIVA' },
-      { name: 'motivo_baja', label: 'Motivo de baja', medio: true, visible: (v) => v.estado && v.estado !== 'ACTIVA' },
+      { name: 'fecha_baja', label: 'Fecha de baja', tipo: 'fecha', medio: true, visible: (v) => BAJAS_MATRICULA.includes(v.estado) },
+      { name: 'motivo_baja', label: 'Motivo de baja', medio: true, requerido: true, visible: (v) => BAJAS_MATRICULA.includes(v.estado) },
       { name: 'institucion_procedencia', label: 'Institución de procedencia' },
     ],
     inicial: () => ({ fecha: hoyISO(), estado: 'ACTIVA' }),

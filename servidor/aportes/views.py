@@ -135,7 +135,7 @@ def cursos(request):
 def matriculas(request):
     """Alumnos matriculados en el año activo (para exoneraciones)."""
     anio = _anio(request)
-    qs = Matricula.objects.filter(anio_lectivo=anio, estado=Matricula.Estado.ACTIVA).select_related(
+    qs = Matricula.objects.filter(anio_lectivo=anio, estado__in=Matricula.EN_CURSO).select_related(
         "alumno", "seccion__curso").order_by("alumno__apellidos", "alumno__nombres")
     if request.query_params.get("seccion"):
         qs = qs.filter(seccion_id=request.query_params["seccion"])

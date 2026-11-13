@@ -33,7 +33,7 @@ class Datos:
             return
 
         self.matriculas = {
-            m.id: m for m in Matricula.objects.filter(anio_lectivo=self.anio, estado=Matricula.Estado.ACTIVA)
+            m.id: m for m in Matricula.objects.filter(anio_lectivo=self.anio, estado__in=Matricula.EN_CURSO)
             .select_related("alumno", "seccion__curso")
         }
         self.secciones = {s.id: s for s in Seccion.objects.filter(anio_lectivo=self.anio).select_related("curso", "docente_guia")}

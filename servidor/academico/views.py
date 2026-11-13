@@ -1,5 +1,6 @@
 from rest_framework import filters, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from nucleo.instituciones import PorInstitucionMixin, institucion_de
@@ -101,7 +102,7 @@ class SeccionViewSet(Base):
 
         seccion = self.get_object()  # solo secciones de la institución del usuario
         minimo = institucion_de(request).asistencia_minima
-        qs = Matricula.objects.filter(seccion=seccion, estado=Matricula.Estado.ACTIVA)
+        qs = Matricula.objects.filter(seccion=seccion, estado__in=Matricula.EN_CURSO)
         return Response({"minimo": minimo, "alumnos": resumen_asistencia(qs, minimo)})
 
 
@@ -142,7 +143,7 @@ class AsignacionViewSet(Base):
     def lista(self, request, pk=None):
         """Alumnos activos de la clase, en orden de lista, para llamar lista."""
         asignacion = self.get_object()
-        qs = asignacion.seccion.matriculas.filter(estado=Matricula.Estado.ACTIVA).select_related("alumno")
+        qs = asignacion.seccion.matriculas.filter(estado__in=Matricula.EN_CURSO).select_related("alumno")
         qs = qs.order_by("numero_lista", "alumno__apellidos", "alumno__nombres")
         return Response([
             {"matricula": m.id, "numero_lista": m.numero_lista, "alumno_id": m.alumno_id,
@@ -158,3 +159,41 @@ class MatriculaViewSet(Base):
     filtros = ["seccion", "alumno", "anio_lectivo", "estado"]
     filter_backends = [filters.SearchFilter]
     search_fields = ["alumno__ci", "alumno__nombres", "alumno__apellidos"]
+    # La matrícula no se borra: se anula con motivo (estado ANULADA).
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    @action(detail=True, methods=["get", "post"], url_path="cambiar-seccion")
+    def cambiar_seccion(self, request, pk=None):
+        """
+        GET: historial de cambios de sección. POST {seccion, fecha_efectiva, motivo, documento?}: pasa al alumno
+        a otra sección del mismo año sin sobrescribir la historia.
+        """
+        from django.db import transaction
+
+        from .serializers import CambioSeccionSerializer
+
+        matricula = self.get_object()
+        if request.method == "GET":
+            return Response(CambioSeccionSerializer(matricula.cambios_seccion.all(), many=True,
+                                                    context={"request": request}).data)
+        s = CambioSeccionSerializer(data=request.data, context={"request": request})
+        s.is_valid(raise_exception=True)
+        nueva = s.validated_data["seccion_nueva"]
+        if matricula.estado not in Matricula.EN_CURSO:
+            raise ValidationError("Solo se cambia de sección a un alumno que está cursando.")
+        if nueva == matricula.seccion:
+            raise ValidationError({"seccion_nueva": "El alumno ya está en esa sección."})
+        if nueva.anio_lectivo_id != matricula.anio_lectivo_id:
+            raise ValidationError({"seccion_nueva": "La sección nueva debe ser del mismo año lectivo."})
+        if not Seccion.objects.filter(pk=nueva.pk, anio_lectivo__institucion_id=matricula.anio_lectivo.institucion_id).exists():
+            raise ValidationError({"seccion_nueva": "Sección no válida."})
+        if s.validated_data["fecha_efectiva"] < matricula.fecha:
+            raise ValidationError({"fecha_efectiva": "No puede ser anterior a la matriculación."})
+        if nueva.inscriptos >= nueva.cupo:
+            raise ValidationError({"seccion_nueva": f"La sección {nueva} ya completó su cupo ({nueva.cupo})."})
+        with transaction.atomic():
+            cambio = s.save(matricula=matricula, seccion_anterior=matricula.seccion, autorizado_por=request.user)
+            matricula.seccion = nueva
+            matricula.numero_lista = None  # el número de lista es de la sección anterior
+            matricula.save()
+        return Response(CambioSeccionSerializer(cambio, context={"request": request}).data, status=201)

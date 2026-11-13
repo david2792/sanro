@@ -113,7 +113,7 @@ class PagoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("La fecha del pago no puede ser futura.")
         if not data["detalles"]:
             raise serializers.ValidationError("Agregá al menos una cuota al recibo.")
-        if data["matricula"].estado != Matricula.Estado.ACTIVA:
+        if data["matricula"].estado not in Matricula.EN_CURSO:
             raise serializers.ValidationError("La matrícula del alumno no está activa.")
         return data
 

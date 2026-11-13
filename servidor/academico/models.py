@@ -231,7 +231,7 @@ class Seccion(models.Model):
 
     @property
     def inscriptos(self):
-        return self.matriculas.filter(estado=Matricula.Estado.ACTIVA).count()
+        return self.matriculas.filter(estado__in=Matricula.EN_CURSO).count()
 
     def __str__(self):
         return f"{self.curso} {self.letra} ({self.get_turno_display()}) {self.anio_lectivo}"
@@ -268,19 +268,46 @@ class Asignacion(models.Model):
 
 
 class Matricula(models.Model):
+    """
+    Una matrícula por alumno y año (plan maestro 5). Su historia no se sobrescribe: los cambios de
+    sección quedan en CambioSeccion y los cambios de estado en la auditoría.
+    """
+
     class Estado(models.TextChoices):
-        ACTIVA = "ACTIVA", "Activa"
+        PREINSCRIPTO = "PREINSCRIPTO", "Preinscripto"
+        PENDIENTE_DOC = "PENDIENTE_DOC", "Pendiente de documentación"
+        ACTIVA = "ACTIVA", "Matriculado"
         RETIRADO = "RETIRADO", "Retirado"
         TRASLADADO = "TRASLADADO", "Trasladado (pase)"
         PROMOVIDO = "PROMOVIDO", "Promovido"
         REPROBADO = "REPROBADO", "No promovido"
+        EGRESADO = "EGRESADO", "Egresado"
+        ANULADA = "ANULADA", "Anulada"
+
+    # Cursando: aparece en las listas, ocupa cupo y puede aportar (la documentación pendiente no impide asistir).
+    EN_CURSO = (Estado.ACTIVA, Estado.PENDIENTE_DOC)
+    # Bajas: piden fecha y motivo.
+    BAJAS = (Estado.RETIRADO, Estado.TRASLADADO, Estado.ANULADA)
+    # Cambios de estado permitidos (lo demás se rechaza). Reincorporar a un retirado o trasladado es posible.
+    TRANSICIONES = {
+        Estado.PREINSCRIPTO: {Estado.PENDIENTE_DOC, Estado.ACTIVA, Estado.ANULADA},
+        Estado.PENDIENTE_DOC: {Estado.ACTIVA, Estado.RETIRADO, Estado.TRASLADADO, Estado.ANULADA},
+        Estado.ACTIVA: {Estado.PENDIENTE_DOC, Estado.RETIRADO, Estado.TRASLADADO, Estado.PROMOVIDO,
+                        Estado.REPROBADO, Estado.EGRESADO, Estado.ANULADA},
+        Estado.RETIRADO: {Estado.ACTIVA},
+        Estado.TRASLADADO: {Estado.ACTIVA},
+        Estado.PROMOVIDO: {Estado.ACTIVA, Estado.EGRESADO},
+        Estado.REPROBADO: {Estado.ACTIVA},
+        Estado.EGRESADO: set(),
+        Estado.ANULADA: set(),
+    }
 
     alumno = models.ForeignKey(Alumno, on_delete=models.PROTECT, related_name="matriculas")
     seccion = models.ForeignKey(Seccion, on_delete=models.PROTECT, related_name="matriculas")
     anio_lectivo = models.ForeignKey(AnioLectivo, on_delete=models.PROTECT, editable=False)
     numero_lista = models.PositiveSmallIntegerField("N° de lista", null=True, blank=True)
     fecha = models.DateField("Fecha de matriculación")
-    estado = models.CharField(max_length=12, choices=Estado.choices, default=Estado.ACTIVA)
+    estado = models.CharField(max_length=13, choices=Estado.choices, default=Estado.ACTIVA)
     fecha_baja = models.DateField(null=True, blank=True)
     motivo_baja = models.CharField(max_length=200, blank=True)
     institucion_procedencia = models.CharField(max_length=200, blank=True)
@@ -301,9 +328,30 @@ class Matricula(models.Model):
             alumno_id=self.alumno_id, anio_lectivo_id=self.anio_lectivo_id
         ).exclude(pk=self.pk).exists():
             raise ValidationError("El alumno ya está matriculado en este año lectivo.")
-        nueva = self.pk is None
-        if nueva and self.estado == self.Estado.ACTIVA and self.seccion.inscriptos >= self.seccion.cupo:
+        # Cupo: se controla al entrar a cursar (alta directa o al pasar de preinscripto).
+        # La falta de aportes a la ACE nunca impide matricular (plan maestro 2.5).
+        anterior = Matricula.objects.filter(pk=self.pk).values_list("estado", flat=True).first() if self.pk else None
+        if self.estado in self.EN_CURSO and anterior not in self.EN_CURSO and self.seccion.inscriptos >= self.seccion.cupo:
             raise ValidationError(f"La sección {self.seccion} ya completó su cupo ({self.seccion.cupo}).")
+
+    def seccion_en(self, fecha):
+        """Sección en la que estaba el alumno ese día (según los cambios de sección registrados)."""
+        posteriores = sorted((c for c in self.cambios_seccion.all() if c.fecha_efectiva > fecha),
+                             key=lambda c: (c.fecha_efectiva, c.id))
+        return posteriores[0].seccion_anterior_id if posteriores else self.seccion_id
+
+    def cursaba_en(self, fecha):
+        """Estaba matriculado ese día: ya inscripto, sin baja anterior y no anulada ni solo preinscripta."""
+        if self.estado in (self.Estado.PREINSCRIPTO, self.Estado.ANULADA):
+            return False
+        return self.fecha <= fecha and (self.fecha_baja is None or fecha < self.fecha_baja)
+
+    @classmethod
+    def en_seccion(cls, seccion_id, fecha):
+        """Ids de las matrículas que cursaban en esa sección ese día (plan 7.5)."""
+        candidatas = (cls.objects.filter(models.Q(seccion_id=seccion_id) | models.Q(cambios_seccion__seccion_anterior_id=seccion_id))
+                      .distinct().prefetch_related("cambios_seccion"))
+        return {m.id for m in candidatas if m.seccion_en(fecha) == seccion_id and m.cursaba_en(fecha)}
 
     def save(self, *args, **kwargs):
         self.anio_lectivo_id = self.seccion.anio_lectivo_id
@@ -311,3 +359,24 @@ class Matricula(models.Model):
 
     def __str__(self):
         return f"{self.alumno} - {self.seccion}"
+
+
+class CambioSeccion(models.Model):
+    """Cambio de sección dentro del año (plan maestro 5): no se sobrescribe la historia de la matrícula."""
+
+    matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="cambios_seccion")
+    seccion_anterior = models.ForeignKey(Seccion, on_delete=models.PROTECT, related_name="+")
+    seccion_nueva = models.ForeignKey(Seccion, on_delete=models.PROTECT, related_name="+")
+    fecha_efectiva = models.DateField()
+    motivo = models.CharField(max_length=250)
+    documento = models.FileField("Documento de respaldo", upload_to="cambios_seccion/%Y/", null=True, blank=True)
+    autorizado_por = models.ForeignKey("personas.Usuario", null=True, on_delete=models.SET_NULL, related_name="+")
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["matricula", "fecha_efectiva", "id"]
+        verbose_name = "cambio de sección"
+        verbose_name_plural = "cambios de sección"
+
+    def __str__(self):
+        return f"{self.matricula.alumno}: {self.seccion_anterior} → {self.seccion_nueva} ({self.fecha_efectiva})"

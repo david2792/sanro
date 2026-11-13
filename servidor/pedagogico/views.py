@@ -166,7 +166,7 @@ class UnidadViewSet(PropiasMixin, viewsets.ModelViewSet):
 
         cargadas = set(marcas)
         matriculas = asignacion.seccion.matriculas.filter(
-            Q(estado=Matricula.Estado.ACTIVA) | Q(id__in=cargadas)
+            Q(estado__in=Matricula.EN_CURSO) | Q(id__in=cargadas)
         ).select_related("alumno").order_by("numero_lista", "alumno__apellidos", "alumno__nombres")
 
         alumnos = []
@@ -489,7 +489,7 @@ class InstrumentoViewSet(PropiasMixin, viewsets.ModelViewSet):
 
         cargados = {p.matricula_id: p for p in instrumento.puntajes.all()}
         matriculas = instrumento.asignacion.seccion.matriculas.filter(
-            Q(estado=Matricula.Estado.ACTIVA) | Q(id__in=cargados.keys())
+            Q(estado__in=Matricula.EN_CURSO) | Q(id__in=cargados.keys())
         ).select_related("alumno").order_by("numero_lista", "alumno__apellidos", "alumno__nombres")
         vacio = Puntaje()
         return Response({
@@ -568,7 +568,7 @@ def calcular_planilla(asignacion, etapa=None, matriculas=None):
 
     filas = []
     if matriculas is None:
-        matriculas = asignacion.seccion.matriculas.filter(estado=Matricula.Estado.ACTIVA)
+        matriculas = asignacion.seccion.matriculas.filter(estado__in=Matricula.EN_CURSO)
     matriculas = matriculas.select_related("alumno").order_by("numero_lista", "alumno__apellidos", "alumno__nombres")
     vacio = Puntaje()
     for m in matriculas:

@@ -31,8 +31,10 @@ Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de ac
 - ✅ 1.2 Asistencia con borrador y confirmación; correcciones de listas confirmadas con motivo (decisión 0009).
 - ✅ 1.2 Anulación de clases con motivo; historial de cambios de cada lista.
 - ✅ 1.2 Retiro anticipado; origen de la marca; quién creó y quién sincronizó.
-- Matrícula: estados del plan (preinscripto, pendiente de documentación, egresado, anulado) y
-  historial de cambios de sección sin sobrescribir.
+- ✅ 1.3 Matrícula: estados del plan (preinscripto, pendiente de documentación, egresado, anulada),
+  transiciones validadas, bajas con motivo, sin borrado e historial de cambios de sección.
+- ✅ 1.3 Asistencia solo de alumnos que ese día cursaban en la sección (plan 7.5).
+- Constancia de matrícula en PDF (va con las plantillas de Gestión documental).
 - Estados del año lectivo (preparación, activo, cierre pendiente, cerrado, archivado).
 
 ## Fase 2 — Aportes voluntarios a la ACE ⬜

@@ -64,7 +64,7 @@ class AlumnoSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
     def get_seccion_actual(self, obj):
-        m = obj.matriculas.filter(estado="ACTIVA", anio_lectivo__activo=True).select_related("seccion").first()
+        m = obj.matriculas.filter(estado__in=["ACTIVA", "PENDIENTE_DOC"], anio_lectivo__activo=True).select_related("seccion").first()
         return {"matricula_id": m.id, "seccion_id": m.seccion_id, "seccion": str(m.seccion)} if m else None
 
 

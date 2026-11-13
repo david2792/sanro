@@ -6,6 +6,7 @@ import { CrudPage, FormularioCrud, usePaginacion, type CrudConfig } from '../../
 import { Boton, Cargando, Encabezado, ErrorCaja, Etiqueta, Tarjeta, Vacio } from '../../components/ui'
 import { api } from '../../lib/api'
 import { cn, fechaCorta } from '../../lib/utils'
+import CambioSeccion from './CambioSeccion'
 import { REFERENCIALES } from './referenciales'
 
 const plural = (n: number, palabra: string) => `${n} ${palabra}${n === 1 ? '' : 's'}`
@@ -191,6 +192,7 @@ export function AlumnoDetalle() {
         anecdoticos.data?.results?.length ? <ListaAnecdoticos registros={anecdoticos.data.results} /> : <Vacio titulo="Sin registros anecdóticos" />
       ))}
 
+      {tab === 'matriculas' && <CambioSeccion alumno={Number(id)} />}
       {tab === 'matriculas' && (
         <CrudPage embebido config={{ ...REFERENCIALES.matriculas, titulo: 'Historial de matrículas', enlace: undefined }} filtro={`alumno=${id}`} fijos={{ alumno: Number(id) }} />
       )}

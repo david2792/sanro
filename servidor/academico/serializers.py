@@ -1,9 +1,10 @@
 from datetime import time
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import (AnioLectivo, Asignacion, Curso, DiaNoLectivo, Especialidad, Etapa,
+from .models import (AnioLectivo, Asignacion, CambioSeccion, Curso, DiaNoLectivo, Especialidad, Etapa,
                      Institucion, Materia, Matricula, Nivel, PlanMateria, Seccion)
 
 
@@ -157,11 +158,44 @@ class MatriculaSerializer(serializers.ModelSerializer):
         read_only_fields = ["anio_lectivo"]
         validators = []  # la unicidad alumno/año se valida en Matricula.clean()
 
+    estado_nombre = serializers.CharField(source="get_estado_display", read_only=True)
+
     def validate(self, data):
-        instancia = Matricula(**{**({f.name: getattr(self.instance, f.name) for f in Matricula._meta.concrete_fields}
-                                    if self.instance else {}), **data})
+        E = Matricula.Estado
+        actual = self.instance
+        if actual is not None:
+            if "seccion" in data and data["seccion"] != actual.seccion:
+                raise serializers.ValidationError(
+                    {"seccion": "Para cambiar de sección usá «Cambiar de sección» (queda en el historial)."})
+            if "alumno" in data and data["alumno"] != actual.alumno:
+                raise serializers.ValidationError({"alumno": "Una matrícula no se pasa a otro alumno."})
+            nuevo = data.get("estado", actual.estado)
+            if nuevo != actual.estado and nuevo not in Matricula.TRANSICIONES[actual.estado]:
+                raise serializers.ValidationError(
+                    {"estado": f"No se puede pasar de «{actual.get_estado_display()}» a «{E(nuevo).label}»."})
+        nuevo = data.get("estado", getattr(actual, "estado", E.ACTIVA))
+        if nuevo in Matricula.BAJAS:
+            if not (data.get("motivo_baja") or getattr(actual, "motivo_baja", "")).strip():
+                raise serializers.ValidationError({"motivo_baja": "Indicá el motivo de la baja."})
+            if not (data.get("fecha_baja") or getattr(actual, "fecha_baja", None)):
+                data["fecha_baja"] = timezone.localdate()
+        elif actual is not None and actual.estado in Matricula.BAJAS and nuevo in Matricula.EN_CURSO:
+            data["fecha_baja"], data["motivo_baja"] = None, ""  # reincorporación (la baja queda en el historial)
+        instancia = Matricula(**{**({f.name: getattr(actual, f.name) for f in Matricula._meta.concrete_fields}
+                                    if actual else {}), **data})
         try:
             instancia.clean()
         except DjangoValidationError as e:
             raise serializers.ValidationError(e.messages)
         return data
+
+
+class CambioSeccionSerializer(serializers.ModelSerializer):
+    seccion_anterior_descripcion = serializers.CharField(source="seccion_anterior.__str__", read_only=True)
+    seccion_nueva_descripcion = serializers.CharField(source="seccion_nueva.__str__", read_only=True)
+    autorizado_por_nombre = serializers.CharField(source="autorizado_por.__str__", read_only=True, default=None)
+
+    class Meta:
+        model = CambioSeccion
+        fields = "__all__"
+        read_only_fields = ["matricula", "seccion_anterior", "autorizado_por"]
