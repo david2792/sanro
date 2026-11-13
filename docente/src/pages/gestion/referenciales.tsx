@@ -18,6 +18,13 @@ export const ROLES = [
   { valor: 'TUTOR', label: 'Padre/Madre/Tutor' },
   { valor: 'ACES', label: 'ACES (cooperadora)' },
 ]
+const ESTADOS_ANIO = [
+  { valor: 'PREPARACION', label: 'En preparación' },
+  { valor: 'ACTIVO', label: 'Activo' },
+  { valor: 'CIERRE_PENDIENTE', label: 'Cierre pendiente' },
+  { valor: 'CERRADO', label: 'Cerrado' },
+  { valor: 'ARCHIVADO', label: 'Archivado' },
+]
 export const ESTADOS_MATRICULA = [
   { valor: 'PREINSCRIPTO', label: 'Preinscripto' },
   { valor: 'PENDIENTE_DOC', label: 'Pendiente de documentación' },
@@ -90,18 +97,22 @@ export const REFERENCIALES: Record<string, CrudConfig> = {
   },
   anios: {
     titulo: 'Años lectivos', singular: 'Año lectivo', ruta: '/anios-lectivos/',
-    descripcion: 'Solo un año puede estar activo: es el que usan los docentes.',
+    descripcion: 'Solo un año es el de trabajo. Un año cerrado no se modifica: para corregirlo, la dirección lo reabre con motivo.',
     columnas: [
       { label: 'Año', valor: (o) => o.anio, principal: true },
       { label: 'Inicio', valor: (o) => fechaCorta(o.fecha_inicio) },
       { label: 'Fin', valor: (o) => fechaCorta(o.fecha_fin) },
-      { label: 'Estado', valor: (o) => (o.activo ? <Etiqueta tono="verde">Activo</Etiqueta> : '') },
+      { label: 'Estado', valor: (o) => <Etiqueta tono={o.activo ? 'verde' : o.estado === 'CERRADO' || o.estado === 'ARCHIVADO' ? 'gris' : 'ambar'}>{o.estado_nombre}{o.activo ? ' · de trabajo' : ''}</Etiqueta> },
     ],
     campos: [
       { name: 'anio', label: 'Año', tipo: 'numero', requerido: true },
       { name: 'fecha_inicio', label: 'Inicio de clases', tipo: 'fecha', requerido: true, medio: true },
       { name: 'fecha_fin', label: 'Fin de clases', tipo: 'fecha', requerido: true, medio: true },
-      { name: 'activo', label: 'Año activo', tipo: 'si_no', ayuda: 'Marcar como año en curso' },
+      { name: 'estado', label: 'Estado', tipo: 'select', opciones: ESTADOS_ANIO, medio: true,
+        ayuda: 'Preparación → Activo → Cierre pendiente → Cerrado → Archivado.' },
+      { name: 'activo', label: 'Año de trabajo', tipo: 'si_no', ayuda: 'Es el año que usan los docentes (solo uno).' },
+      { name: 'motivo', label: 'Motivo del cambio de estado', ayuda: 'Obligatorio para reabrir un año cerrado (solo dirección).',
+        visible: (v) => v.estado === 'CIERRE_PENDIENTE' },
     ],
     inicial: () => ({ anio: new Date().getFullYear(), activo: true }),
   },

@@ -50,12 +50,36 @@ class Institucion(models.Model):
 
 
 class AnioLectivo(models.Model):
+    """
+    Ciclo de vida (plan maestro, módulo 1): preparación → activo → cierre pendiente → cerrado → archivado.
+    Los datos de un año cerrado o archivado no se modifican (academico/cierre.py); para corregir,
+    dirección lo reabre con motivo (queda en la auditoría).
+    """
+
+    class Estado(models.TextChoices):
+        PREPARACION = "PREPARACION", "En preparación"
+        ACTIVO = "ACTIVO", "Activo"
+        CIERRE_PENDIENTE = "CIERRE_PENDIENTE", "Cierre pendiente"
+        CERRADO = "CERRADO", "Cerrado"
+        ARCHIVADO = "ARCHIVADO", "Archivado"
+
+    BLOQUEADOS = (Estado.CERRADO, Estado.ARCHIVADO)
+    TRANSICIONES = {
+        Estado.PREPARACION: {Estado.ACTIVO},
+        Estado.ACTIVO: {Estado.CIERRE_PENDIENTE},
+        Estado.CIERRE_PENDIENTE: {Estado.ACTIVO, Estado.CERRADO},
+        Estado.CERRADO: {Estado.ARCHIVADO, Estado.CIERRE_PENDIENTE},  # volver a cierre pendiente = reapertura
+        Estado.ARCHIVADO: set(),
+    }
+
     institucion = models.ForeignKey(Institucion, on_delete=models.PROTECT, related_name="anios_lectivos",
                                     default=institucion_por_defecto, editable=False)
     anio = models.PositiveSmallIntegerField("Año")
     fecha_inicio = models.DateField()
     fecha_fin = models.DateField()
-    activo = models.BooleanField(default=False)
+    estado = models.CharField(max_length=16, choices=Estado.choices, default=Estado.PREPARACION)
+    activo = models.BooleanField(
+        default=False, help_text="Año de trabajo de la institución (solo uno). Solo si está activo o en cierre pendiente.")
 
     class Meta:
         ordering = ["-anio"]

@@ -16,6 +16,11 @@ class NucleoConfig(AppConfig):
 
         auditoria.conectar()
 
+        # Los datos de un año lectivo cerrado o archivado no se modifican (plan maestro, módulo 1).
+        from academico import cierre
+
+        cierre.conectar()
+
         # Todos los FileField de la API se muestran como enlaces firmados (nunca la ruta de /media/).
         ModelSerializer.serializer_field_mapping[models.FileField] = ArchivoPrivadoField
 

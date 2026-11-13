@@ -15,9 +15,53 @@ class InstitucionSerializer(serializers.ModelSerializer):
 
 
 class AnioLectivoSerializer(serializers.ModelSerializer):
+    """
+    El estado se cambia con el mismo formulario, siguiendo AnioLectivo.TRANSICIONES.
+    Reabrir un año cerrado (volver a cierre pendiente) lo hace solo la dirección y exige motivo.
+    """
+
+    estado_nombre = serializers.CharField(source="get_estado_display", read_only=True)
+    motivo = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=250)
+
     class Meta:
         model = AnioLectivo
         fields = "__all__"
+
+    def validate(self, data):
+        from nucleo import contexto
+
+        E = AnioLectivo.Estado
+        actual = self.instance
+        motivo = (data.pop("motivo", "") or "").strip()
+        anterior = actual.estado if actual else E.PREPARACION
+        if actual is None and data.get("activo") and "estado" not in data:
+            data["estado"] = E.ACTIVO  # crear un año marcado como de trabajo lo deja activo
+        nuevo = data.get("estado", anterior)
+        if actual is None and nuevo not in (E.PREPARACION, E.ACTIVO):
+            raise serializers.ValidationError({"estado": "Un año nuevo empieza en preparación o activo."})
+        if actual is not None and nuevo != anterior:
+            if nuevo not in AnioLectivo.TRANSICIONES[anterior]:
+                raise serializers.ValidationError(
+                    {"estado": f"No se puede pasar de «{actual.get_estado_display()}» a «{E(nuevo).label}»."})
+            if anterior == E.CERRADO and nuevo == E.CIERRE_PENDIENTE:
+                usuario = self.context["request"].user
+                if not (usuario.is_superuser or usuario.rol == usuario.Rol.DIRECTOR):
+                    raise serializers.ValidationError("Solo la dirección puede reabrir un año cerrado.")
+                if not motivo:
+                    raise serializers.ValidationError({"motivo": "Indicá por qué se reabre el año (queda en el historial)."})
+        if actual is not None and anterior in AnioLectivo.BLOQUEADOS:
+            otros = {k for k, v in data.items() if k != "estado" and getattr(actual, k) != v}
+            if otros:
+                raise serializers.ValidationError("El año está cerrado: solo se puede reabrir o archivar.")
+        if nuevo in AnioLectivo.BLOQUEADOS or nuevo == E.PREPARACION:
+            data["activo"] = False
+        elif nuevo == E.ACTIVO and actual is not None and anterior != E.ACTIVO:
+            data.setdefault("activo", True)
+        if data.get("activo") and nuevo not in (E.ACTIVO, E.CIERRE_PENDIENTE):
+            raise serializers.ValidationError({"activo": "Solo un año activo o en cierre pendiente puede ser el año de trabajo."})
+        if motivo:
+            contexto.fijar_motivo(motivo)
+        return data
 
 
 class EtapaSerializer(serializers.ModelSerializer):

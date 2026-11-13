@@ -24,7 +24,7 @@ Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de ac
 - Mapear cada `Nivel`/`Especialidad` del colegio a las categorías del registro normativo
   (Tercer Ciclo / Media; Científico / Técnico) para resolver reglas automáticamente.
 
-## Fase 1 — Asistencia, justificativos y matrícula con historial 🔄
+## Fase 1 — Asistencia, justificativos y matrícula con historial ✅ (13/11/2026)
 - ✅ 1.1 Justificativo como proceso aparte con estados; la ausencia no se reemplaza; aprobación parcial;
   sin borrado (decisión 0008). Pantalla `Gestión › Justificativos`.
 - ✅ 1.1 Quitar el estado `J` de la marca de asistencia (datos existentes migrados a justificativos aprobados).
@@ -35,7 +35,7 @@ Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de ac
   transiciones validadas, bajas con motivo, sin borrado e historial de cambios de sección.
 - ✅ 1.3 Asistencia solo de alumnos que ese día cursaban en la sección (plan 7.5).
 - Constancia de matrícula en PDF (va con las plantillas de Gestión documental).
-- Estados del año lectivo (preparación, activo, cierre pendiente, cerrado, archivado).
+- ✅ 1.4 Estados del año lectivo y bloqueo de los años cerrados; reapertura solo por dirección con motivo (decisión 0010).
 
 ## Fase 2 — Aportes voluntarios a la ACE ⬜
 - Rediseñar `aportes`: aportes voluntarios y donaciones; sin vencimientos, deuda, morosos ni exoneraciones.
