@@ -492,7 +492,7 @@ class EvaluacionesSeccionTest(APITestCase):
         self.assertEqual(self.client.get(url).status_code, 400)
 
     def test_maximo_de_pruebas_por_dia(self):
-        inst = Institucion.objects.create(nombre="Colegio")  # por defecto: 1 prueba por día y se bloquea
+        inst = self.u_a.institucion  # la de los usuarios; por defecto: 1 prueba por día y se bloquea
         self.login(self.u_a)
         nueva = {"asignacion": self.mat.id, "etapa": self.etapa.id, "titulo": "Prueba 2",
                  "fecha": "2027-03-20", "puntaje_total": 10, "tipo": "PRUEBA"}

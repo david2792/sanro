@@ -6,6 +6,7 @@ from django.db.models import Max
 from rest_framework import serializers
 
 from academico.models import AnioLectivo, Matricula
+from nucleo.instituciones import institucion_de
 from .models import ConceptoAporte, DetallePago, Exoneracion, Pago
 
 
@@ -24,7 +25,8 @@ class ConceptoAporteSerializer(serializers.ModelSerializer):
         return [str(c) for c in obj.cursos.all()]
 
     def validate(self, data):
-        anio = data.get("anio_lectivo") or getattr(self.instance, "anio_lectivo", None) or AnioLectivo.actual()
+        anio = data.get("anio_lectivo") or getattr(self.instance, "anio_lectivo", None) or AnioLectivo.actual(
+            institucion_de(self.context.get("request")))
         if anio is None:
             raise serializers.ValidationError("No hay un año lectivo activo.")
         data["anio_lectivo"] = anio

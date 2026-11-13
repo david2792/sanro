@@ -1,6 +1,15 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from nucleo.instituciones import institucion_por_defecto
+
+
+def _fk_institucion(related_name, null=False):
+    return models.ForeignKey(
+        "academico.Institucion", on_delete=models.PROTECT, related_name=related_name,
+        default=institucion_por_defecto, editable=False, null=null, blank=null,
+    )
+
 
 class Usuario(AbstractUser):
     """Usuario del sistema. El rol define qué puede ver y hacer."""
@@ -14,6 +23,8 @@ class Usuario(AbstractUser):
         ACES = "ACES", "ACES (cooperadora)"
 
     rol = models.CharField(max_length=20, choices=Rol.choices, default=Rol.DOCENTE)
+    # Vacía solo en un superusuario global, que ve todas las instituciones.
+    institucion = _fk_institucion("usuarios", null=True)
     ci = models.CharField("C.I.", max_length=20, blank=True)
     telefono = models.CharField(max_length=30, blank=True)
 
@@ -39,7 +50,8 @@ class Sexo(models.TextChoices):
 
 
 class Alumno(models.Model):
-    ci = models.CharField("C.I.", max_length=20, unique=True)
+    institucion = _fk_institucion("alumnos")
+    ci = models.CharField("C.I.", max_length=20)
     nombres = models.CharField(max_length=100)
     apellidos = models.CharField(max_length=100)
     fecha_nacimiento = models.DateField(null=True, blank=True)
@@ -54,13 +66,15 @@ class Alumno(models.Model):
 
     class Meta:
         ordering = ["apellidos", "nombres"]
+        constraints = [models.UniqueConstraint(fields=["institucion", "ci"], name="alumno_ci_unica_por_institucion")]
 
     def __str__(self):
         return f"{self.apellidos}, {self.nombres}"
 
 
 class Tutor(models.Model):
-    ci = models.CharField("C.I.", max_length=20, unique=True)
+    institucion = _fk_institucion("tutores")
+    ci = models.CharField("C.I.", max_length=20)
     nombres = models.CharField(max_length=100)
     apellidos = models.CharField(max_length=100)
     telefono = models.CharField("Teléfono / WhatsApp", max_length=30, blank=True)
@@ -73,6 +87,7 @@ class Tutor(models.Model):
 
     class Meta:
         ordering = ["apellidos", "nombres"]
+        constraints = [models.UniqueConstraint(fields=["institucion", "ci"], name="tutor_ci_unica_por_institucion")]
         verbose_name_plural = "tutores"
 
     def __str__(self):
@@ -107,7 +122,8 @@ class Docente(models.Model):
     usuario = models.OneToOneField(
         Usuario, null=True, blank=True, on_delete=models.SET_NULL, related_name="docente"
     )
-    ci = models.CharField("C.I.", max_length=20, unique=True)
+    institucion = _fk_institucion("docentes")
+    ci = models.CharField("C.I.", max_length=20)
     nombres = models.CharField(max_length=100)
     apellidos = models.CharField(max_length=100)
     telefono = models.CharField(max_length=30, blank=True)
@@ -118,6 +134,7 @@ class Docente(models.Model):
 
     class Meta:
         ordering = ["apellidos", "nombres"]
+        constraints = [models.UniqueConstraint(fields=["institucion", "ci"], name="docente_ci_unica_por_institucion")]
 
     def __str__(self):
         return f"{self.apellidos}, {self.nombres}"

@@ -2,6 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from academico.models import Institucion
+from nucleo.instituciones import institucion_de
 
 from .models import (Capacidad, Indicador, Instrumento, PlanClase, Puntaje, RegistroAnecdotico,
                      RegistroClase, Sugerencia, Unidad)
@@ -269,7 +270,7 @@ class InstrumentoSerializer(serializers.ModelSerializer):
         tipo = data.get("tipo", getattr(self.instance, "tipo", Instrumento.Tipo.PRACTICO))
         if self.instance and fecha == self.instance.fecha and tipo == self.instance.tipo:
             return  # no cambió el día ni el tipo: no se revisa (no traba la edición de lo ya cargado)
-        inst = Institucion.objects.first()
+        inst = institucion_de(self.context.get("request"))
         if not (inst and inst.bloquear_evaluaciones and inst.max_evaluaciones_dia and fecha
                 and inst.cuenta_como_evaluacion(tipo)):
             return

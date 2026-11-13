@@ -55,6 +55,8 @@ def registrar_evento(accion, *, objeto=None, modelo="", objeto_id="", descripcio
     from .models import RegistroAuditoria
 
     usuario = usuario or contexto.usuario_actual()
+    # Institución: la del usuario; si el cambio lo hizo el sistema, la del propio registro (si la tiene).
+    institucion_id = getattr(usuario, "institucion_id", None) or getattr(objeto, "institucion_id", None)
     if objeto is not None:
         modelo = modelo or objeto._meta.label_lower
         objeto_id = objeto_id or str(objeto.pk)
@@ -62,7 +64,7 @@ def registrar_evento(accion, *, objeto=None, modelo="", objeto_id="", descripcio
     return RegistroAuditoria.objects.create(
         usuario=usuario if getattr(usuario, "pk", None) else None,
         usuario_nombre=getattr(usuario, "username", "") or "",
-        institucion_id=getattr(usuario, "institucion_id", None),
+        institucion_id=institucion_id,
         accion=accion,
         modelo=modelo,
         objeto_id=str(objeto_id)[:64],

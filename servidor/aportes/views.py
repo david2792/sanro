@@ -9,9 +9,10 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from academico.models import AnioLectivo, Curso, Institucion, Matricula, Seccion
+from academico.models import AnioLectivo, Curso, Matricula, Seccion
 from academico.views import FiltroParamsMixin
 from personas.models import AlumnoTutor
+from nucleo.instituciones import PorInstitucionMixin, institucion_de
 from personas.permisos import EsAcesOGestion
 from .estado import (AL_DIA, COMPLETO, CON_DEUDA, EXONERADO, EXONERADO_TOTAL, MESES, PAGADO, PAGO_PARCIAL, PARCIAL,
                      POR_VENCER, SIN_CUOTAS, SIN_PAGOS, EstadoAportes, nombre_seccion, pct)
@@ -19,8 +20,8 @@ from .models import ConceptoAporte, DetallePago, Exoneracion, Pago
 from .serializers import ConceptoAporteSerializer, ExoneracionSerializer, PagoSerializer
 
 
-def _anio():
-    anio = AnioLectivo.actual()
+def _anio(request):
+    anio = AnioLectivo.actual(institucion_de(request))
     if anio is None:
         raise ValidationError("No hay un año lectivo activo. Activalo en Gestión › Años lectivos.")
     return anio
@@ -41,19 +42,19 @@ def _secciones(anio):
 
 
 def _encabezado(anio):
-    inst = Institucion.objects.first()
-    return {"institucion": inst.nombre if inst else "", "anio": anio.anio, "generado": timezone.localtime().isoformat()}
+    return {"institucion": anio.institucion.nombre, "anio": anio.anio, "generado": timezone.localtime().isoformat()}
 
 
 # ------------------------------------------------------------------ ABM
 
-class ConceptoAporteViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
+class ConceptoAporteViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
     """Conceptos que cobra la ACES. Sin ?anio_lectivo= muestra los del año activo."""
 
     queryset = ConceptoAporte.objects.select_related("anio_lectivo").prefetch_related("cursos")
     serializer_class = ConceptoAporteSerializer
     permission_classes = [EsAcesOGestion]
     filtros = ["anio_lectivo", "activo"]
+    campo_institucion = "anio_lectivo__institucion"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -62,7 +63,8 @@ class ConceptoAporteViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
         return qs
 
 
-class ExoneracionViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
+class ExoneracionViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
+    campo_institucion = "concepto__anio_lectivo__institucion"
     queryset = Exoneracion.objects.select_related("matricula__alumno", "matricula__seccion__curso", "concepto").order_by(
         "concepto__nombre", "matricula__alumno__apellidos", "matricula__alumno__nombres")
     serializer_class = ExoneracionSerializer
@@ -76,7 +78,7 @@ class ExoneracionViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
         serializer.save(registrado_por=self.request.user)
 
 
-class PagoViewSet(FiltroParamsMixin, mixins.CreateModelMixin, mixins.ListModelMixin,
+class PagoViewSet(PorInstitucionMixin, FiltroParamsMixin, mixins.CreateModelMixin, mixins.ListModelMixin,
                   mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     """
     Recibos. No se editan ni se borran: un recibo equivocado se anula.
@@ -90,6 +92,7 @@ class PagoViewSet(FiltroParamsMixin, mixins.CreateModelMixin, mixins.ListModelMi
     serializer_class = PagoSerializer
     permission_classes = [EsAcesOGestion]
     filtros = ["matricula", "matricula__seccion", "anulado", "medio", "anio_lectivo"]
+    campo_institucion = "anio_lectivo__institucion"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -123,14 +126,15 @@ class PagoViewSet(FiltroParamsMixin, mixins.CreateModelMixin, mixins.ListModelMi
 @permission_classes([EsAcesOGestion])
 def cursos(request):
     """Cursos (para elegir a qué cursos corresponde un concepto)."""
-    return Response([{"id": c.id, "descripcion": str(c)} for c in Curso.objects.select_related("nivel", "especialidad")])
+    return Response([{"id": c.id, "descripcion": str(c)} for c in Curso.objects.select_related("nivel", "especialidad").filter(
+        nivel__institucion_id=institucion_de(request).pk)])
 
 
 @api_view(["GET"])
 @permission_classes([EsAcesOGestion])
 def matriculas(request):
     """Alumnos matriculados en el año activo (para exoneraciones)."""
-    anio = _anio()
+    anio = _anio(request)
     qs = Matricula.objects.filter(anio_lectivo=anio, estado=Matricula.Estado.ACTIVA).select_related(
         "alumno", "seccion__curso").order_by("alumno__apellidos", "alumno__nombres")
     if request.query_params.get("seccion"):
@@ -145,7 +149,7 @@ def matriculas(request):
 @permission_classes([EsAcesOGestion])
 def secciones(request):
     """Resumen de aportes de cada sección del año activo."""
-    anio = _anio()
+    anio = _anio(request)
     est = EstadoAportes(anio)
     resumenes = [est.resumen(m) for m in est.matriculas()]
     return Response({**_encabezado(anio), "secciones": est.por_seccion(resumenes, _secciones(anio))})
@@ -155,7 +159,7 @@ def secciones(request):
 @permission_classes([EsAcesOGestion])
 def seccion(request, pk):
     """Planilla de una sección: cada alumno con sus cuotas, pagos y deuda."""
-    anio = _anio()
+    anio = _anio(request)
     sec = get_object_or_404(Seccion.objects.select_related("curso"), pk=pk, anio_lectivo=anio)
     est = EstadoAportes(anio)
     alumnos = []
@@ -177,7 +181,7 @@ def seccion(request, pk):
 @permission_classes([EsAcesOGestion])
 def panel(request):
     """Estado general de los aportes para el panel con gráficos."""
-    anio = _anio()
+    anio = _anio(request)
     est = EstadoAportes(anio)
     resumenes, por_cuota, por_concepto = [], defaultdict(lambda: defaultdict(int)), defaultdict(lambda: defaultdict(int))
     for m in est.matriculas():
@@ -269,7 +273,7 @@ def reporte_recaudacion(request):
     Rendición de lo cobrado en un período (?desde=&hasta=&seccion=).
     Lista cada recibo (también los anulados, marcados) y totaliza por concepto, medio y día.
     """
-    anio = _anio()
+    anio = _anio(request)
     hoy = date.today()
     desde = _fecha(request.query_params.get("desde"), hoy.replace(day=1))
     hasta = _fecha(request.query_params.get("hasta"), hoy)
@@ -319,7 +323,7 @@ def reporte_morosos(request):
     Alumnos que deben, con el contacto del tutor (?seccion=).
     ?incluir=saldo lista todo lo que falta pagar; si no, solo lo vencido.
     """
-    anio = _anio()
+    anio = _anio(request)
     est = EstadoAportes(anio)
     campo = "saldo" if request.query_params.get("incluir") == "saldo" else "deuda"
     filtros = {"seccion_id": request.query_params["seccion"]} if request.query_params.get("seccion") else {}

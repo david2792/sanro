@@ -73,6 +73,69 @@ class AuditoriaTest(Base):
         self.assertEqual(r.data["count"], 1)
 
 
+class VariasInstitucionesTest(APITestCase):
+    """Dos colegios en el mismo sistema: cada uno ve y crea solo lo suyo."""
+
+    def setUp(self):
+        from academico.models import Institucion
+
+        self.a = Institucion.objects.create(nombre="Colegio A")
+        self.b = Institucion.objects.create(nombre="Colegio B")
+        self.dir_a = Usuario.objects.create_user("dir_a", password="x", rol="DIRECTOR", institucion=self.a)
+        self.dir_b = Usuario.objects.create_user("dir_b", password="x", rol="DIRECTOR", institucion=self.b)
+
+    def login(self, user):
+        r = self.client.post("/api/auth/token/", {"username": user.username, "password": "x"})
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + r.data["access"])
+
+    def test_cada_colegio_crea_y_ve_solo_lo_suyo(self):
+        self.login(self.dir_a)
+        ma = self.client.post("/api/materias/", {"nombre": "Matemática"})
+        self.assertEqual(ma.status_code, 201, ma.data)
+        self.assertEqual(Materia.objects.get(pk=ma.data["id"]).institucion, self.a)
+
+        self.login(self.dir_b)
+        mb = self.client.post("/api/materias/", {"nombre": "Matemática"})  # mismo nombre, otro colegio
+        self.assertEqual(mb.status_code, 201, mb.data)
+        self.assertEqual(Materia.objects.get(pk=mb.data["id"]).institucion, self.b)
+        lista = self.client.get("/api/materias/").data["results"]
+        self.assertEqual([m["id"] for m in lista], [mb.data["id"]])
+        self.assertEqual(self.client.get(f"/api/materias/{ma.data['id']}/").status_code, 404)
+        self.assertEqual(self.client.patch(f"/api/materias/{ma.data['id']}/", {"nombre": "X"}).status_code, 404)
+        self.assertEqual([i["id"] for i in self.client.get("/api/instituciones/").data["results"]], [self.b.id])
+
+    def test_ci_unica_por_colegio(self):
+        self.login(self.dir_a)
+        datos = {"ci": "123", "nombres": "Ana", "apellidos": "Prueba"}
+        self.assertEqual(self.client.post("/api/alumnos/", datos).status_code, 201)
+        self.assertEqual(self.client.post("/api/alumnos/", datos).status_code, 400)  # repetida en el mismo colegio
+        self.login(self.dir_b)
+        self.assertEqual(self.client.post("/api/alumnos/", datos).status_code, 201)  # otro colegio: válida
+        self.assertEqual(Alumno.objects.filter(ci="123").count(), 2)
+
+    def test_un_anio_activo_por_colegio(self):
+        from academico.models import AnioLectivo
+
+        self.login(self.dir_a)
+        anio = {"anio": 2027, "fecha_inicio": "2027-02-20", "fecha_fin": "2027-12-01", "activo": True}
+        self.assertEqual(self.client.post("/api/anios-lectivos/", anio).status_code, 201)
+        self.login(self.dir_b)
+        self.assertEqual(self.client.post("/api/anios-lectivos/", anio).status_code, 201)
+        self.assertEqual(AnioLectivo.actual(self.a).institucion, self.a)
+        self.assertEqual(AnioLectivo.actual(self.b).institucion, self.b)  # activar B no desactivó A
+
+    def test_auditoria_separada_y_superusuario_global(self):
+        self.login(self.dir_a)
+        self.client.post("/api/materias/", {"nombre": "Física"})
+        self.login(self.dir_b)
+        self.assertEqual(self.client.get("/api/auditoria/?modelo=academico.materia").data["count"], 0)
+
+        root = Usuario.objects.create_superuser("root", password="x", institucion=None)
+        Materia.objects.create(nombre="Química", institucion=self.b)
+        self.login(root)
+        self.assertEqual(self.client.get("/api/materias/").data["count"], 2)
+
+
 class ArchivosPrivadosTest(Base):
     def setUp(self):
         super().setUp()

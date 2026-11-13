@@ -2,6 +2,7 @@ from rest_framework import filters, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from nucleo.instituciones import PorInstitucionMixin, institucion_de
 from personas.permisos import EsPersonal, GestionEscribePersonalLee
 from .models import (AnioLectivo, Asignacion, Curso, DiaNoLectivo, Especialidad, Etapa,
                      Institucion, Materia, Matricula, Nivel, PlanMateria, Seccion)
@@ -25,13 +26,14 @@ class FiltroParamsMixin:
         return qs
 
 
-class Base(FiltroParamsMixin, viewsets.ModelViewSet):
+class Base(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
     permission_classes = [GestionEscribePersonalLee]
 
 
 class InstitucionViewSet(Base):
     queryset = Institucion.objects.all()
     serializer_class = InstitucionSerializer
+    campo_institucion = "pk"
 
 
 class AnioLectivoViewSet(Base):
@@ -42,12 +44,14 @@ class AnioLectivoViewSet(Base):
 class EtapaViewSet(Base):
     queryset = Etapa.objects.all()
     serializer_class = EtapaSerializer
+    campo_institucion = "anio_lectivo__institucion"
     filtros = ["anio_lectivo"]
 
 
 class DiaNoLectivoViewSet(Base):
     queryset = DiaNoLectivo.objects.all()
     serializer_class = DiaNoLectivoSerializer
+    campo_institucion = "anio_lectivo__institucion"
     filtros = ["anio_lectivo"]
 
 
@@ -59,12 +63,14 @@ class NivelViewSet(Base):
 class EspecialidadViewSet(Base):
     queryset = Especialidad.objects.all()
     serializer_class = EspecialidadSerializer
+    campo_institucion = "nivel__institucion"
     filtros = ["nivel"]
 
 
 class CursoViewSet(Base):
     queryset = Curso.objects.select_related("nivel", "especialidad")
     serializer_class = CursoSerializer
+    campo_institucion = "nivel__institucion"
     filtros = ["nivel", "especialidad"]
 
 
@@ -78,12 +84,14 @@ class MateriaViewSet(Base):
 class PlanMateriaViewSet(Base):
     queryset = PlanMateria.objects.select_related("materia")
     serializer_class = PlanMateriaSerializer
+    campo_institucion = "curso__nivel__institucion"
     filtros = ["curso"]
 
 
 class SeccionViewSet(Base):
     queryset = Seccion.objects.select_related("curso__nivel", "curso__especialidad", "anio_lectivo")
     serializer_class = SeccionSerializer
+    campo_institucion = "anio_lectivo__institucion"
     filtros = ["anio_lectivo", "curso", "turno"]
 
     @action(detail=True)
@@ -91,15 +99,16 @@ class SeccionViewSet(Base):
         """Porcentaje de asistencia de cada alumno de la sección."""
         from asistencia.serializers import resumen_asistencia
 
-        inst = Institucion.objects.first()
-        minimo = inst.asistencia_minima if inst else 80
-        qs = Matricula.objects.filter(seccion_id=pk, estado=Matricula.Estado.ACTIVA)
+        seccion = self.get_object()  # solo secciones de la institución del usuario
+        minimo = institucion_de(request).asistencia_minima
+        qs = Matricula.objects.filter(seccion=seccion, estado=Matricula.Estado.ACTIVA)
         return Response({"minimo": minimo, "alumnos": resumen_asistencia(qs, minimo)})
 
 
 class AsignacionViewSet(Base):
     queryset = Asignacion.objects.select_related("materia", "docente", "seccion__curso", "seccion__anio_lectivo")
     serializer_class = AsignacionSerializer
+    campo_institucion = "seccion__anio_lectivo__institucion"
     filtros = ["seccion", "docente", "materia", "seccion__anio_lectivo"]
 
     def get_queryset(self):
@@ -145,6 +154,7 @@ class AsignacionViewSet(Base):
 class MatriculaViewSet(Base):
     queryset = Matricula.objects.select_related("alumno", "seccion__curso", "seccion__anio_lectivo")
     serializer_class = MatriculaSerializer
+    campo_institucion = "anio_lectivo__institucion"
     filtros = ["seccion", "alumno", "anio_lectivo", "estado"]
     filter_backends = [filters.SearchFilter]
     search_fields = ["alumno__ci", "alumno__nombres", "alumno__apellidos"]

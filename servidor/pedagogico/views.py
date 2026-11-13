@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from academico.models import Asignacion, DiaNoLectivo, Etapa, Matricula
 from academico.views import FiltroParamsMixin
 from asistencia.models import SesionClase
+from nucleo.instituciones import PorInstitucionMixin, institucion_de
 from personas.permisos import EsPersonal
 from .models import (Capacidad, Indicador, Instrumento, PlanClase, Puntaje, RegistroAnecdotico,
                      RegistroClase, Sugerencia, Unidad)
@@ -20,11 +21,16 @@ from .serializers import (CapacidadSerializer, IndicadorSerializer, InstrumentoS
                           RegistroClaseSerializer, SugerenciaSerializer, UnidadSerializer, verificar_asignacion)
 
 
-class PropiasMixin(FiltroParamsMixin):
-    """Docente: solo ve lo de sus asignaciones. Gestión: ve todo."""
+class PropiasMixin(PorInstitucionMixin, FiltroParamsMixin):
+    """Docente: solo ve lo de sus asignaciones. Gestión: ve todo lo de su institución."""
 
     permission_classes = [EsPersonal]
     campo_docente = "asignacion__docente__usuario"
+
+    @property
+    def campo_institucion(self):
+        # Mismo camino que hasta el docente, pero terminando en la institución de la sección.
+        return self.campo_docente.replace("docente__usuario", "seccion__anio_lectivo__institucion")
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -140,7 +146,6 @@ class UnidadViewSet(PropiasMixin, viewsets.ModelViewSet):
         GET  -> encabezado, capacidades con indicadores y, por alumno, L/NL de cada indicador y su % de logro.
         POST -> {logros: [{matricula, indicador, estado: 'L' | 'NL' | null}]}
         """
-        from academico.models import Institucion
         from .models import LogroIndicador
         from .serializers import LogrosLoteSerializer
 
@@ -184,11 +189,11 @@ class UnidadViewSet(PropiasMixin, viewsets.ModelViewSet):
             ev = sum(1 for a in alumnos if str(i.id) in a["logros"])
             por_indicador[str(i.id)] = {"logrados": l, "evaluados": ev, "porcentaje": round(l * 100 / ev, 1) if ev else None}
 
-        inst = Institucion.objects.first()
+        inst = institucion_de(self.request)
         s = asignacion.seccion
         return Response({
             "encabezado": {
-                "institucion": inst.nombre if inst else "",
+                "institucion": inst.nombre,
                 "area": asignacion.materia.nombre,
                 "seccion": f"{s.curso.nombre} {s.letra}",
                 "seccion_completa": str(s),
@@ -294,7 +299,6 @@ class PlanClaseViewSet(PropiasMixin, viewsets.ModelViewSet):
     @action(detail=False)
     def calendario(self, request):
         """Cada día del mes con clase, planificación, si ya se dio, trabajos y días no lectivos."""
-        from academico.models import Institucion
 
         asignacion = asignacion_del_pedido(request)
         primero, ultimo = leer_mes(request.query_params.get("mes"))
@@ -325,12 +329,12 @@ class PlanClaseViewSet(PropiasMixin, viewsets.ModelViewSet):
                 "registro": {"contenido": r.contenido, "unidad_titulo": str(r.unidad) if r.unidad else None} if r else None,
                 "trabajos": trabajos.get(f, []),
             })
-        inst = Institucion.objects.first()
+        inst = institucion_de(self.request)
         s = asignacion.seccion
         return Response({
             "mes": f"{primero:%Y-%m}",
             "encabezado": {
-                "institucion": inst.nombre if inst else "",
+                "institucion": inst.nombre,
                 "materia": asignacion.materia.nombre,
                 "seccion": str(s),
                 "docente": str(asignacion.docente),
@@ -681,7 +685,6 @@ def ficha(request):
     Asistencia (en la materia y en general), trabajos y logro por etapa,
     registros anecdóticos y contactos de la familia.
     """
-    from academico.models import Institucion
     from asistencia.models import RegistroAsistencia
     from personas.models import AlumnoTutor
 
@@ -692,7 +695,7 @@ def ficha(request):
         raise ValidationError("El alumno no pertenece a esta clase.")
     alumno = m.alumno
     hoy = date.today()
-    inst = Institucion.objects.first()
+    inst = institucion_de(request)
 
     registros = RegistroAsistencia.objects.filter(matricula=m)
     faltas = (registros.filter(sesion__asignacion=asignacion, estado__in=["A", "J"])
@@ -730,7 +733,7 @@ def ficha(request):
                    "observaciones": alumno.observaciones},
         "clase": {"materia": asignacion.materia.nombre, "seccion": str(asignacion.seccion),
                   "docente": f"{d.nombres} {d.apellidos}"},
-        "minimos": {"asistencia": inst.asistencia_minima if inst else 80, "logro": inst.logro_minimo if inst else 60},
+        "minimos": {"asistencia": inst.asistencia_minima, "logro": inst.logro_minimo},
         "asistencia": {
             "materia": resumen_registros(registros.filter(sesion__asignacion=asignacion)),
             "general": resumen_registros(registros),
@@ -844,7 +847,9 @@ def planes_anuales(request):
     """Gestión: estado del plan anual de todas las materias del año activo."""
     if not request.user.es_gestion:
         raise ValidationError("Solo para dirección y coordinación.")
-    asignaciones = Asignacion.objects.filter(seccion__anio_lectivo__activo=True).select_related(
+    asignaciones = Asignacion.objects.filter(
+        seccion__anio_lectivo__institucion_id=institucion_de(request).pk, seccion__anio_lectivo__activo=True,
+    ).select_related(
         "materia", "seccion__curso", "docente").order_by("docente__apellidos", "seccion__curso", "materia__nombre")
     return Response([_plan_json(a, request) for a in asignaciones])
 
@@ -860,11 +865,12 @@ def control_planificacion(request):
     """
     from django.db.models import Max
     from django.utils import timezone
-    from academico.models import AnioLectivo, Institucion
+    from academico.models import AnioLectivo
 
     if not request.user.es_gestion:
         raise ValidationError("Solo para dirección y coordinación.")
-    anio = AnioLectivo.actual()
+    inst = institucion_de(request)
+    anio = AnioLectivo.actual(inst)
     if anio is None:
         raise ValidationError("No hay un año lectivo activo.")
     primero, ultimo = leer_mes(request.query_params.get("mes") or f"{date.today():%Y-%m}")
@@ -922,9 +928,8 @@ def control_planificacion(request):
             "total_planificadas": t.get("total", 0),
         })
 
-    inst = Institucion.objects.first()
     return Response({
-        "institucion": inst.nombre if inst else "",
+        "institucion": inst.nombre,
         "anio": anio.anio,
         "mes": f"{primero:%Y-%m}",
         "generado": timezone.localtime().isoformat(),
@@ -945,7 +950,7 @@ def evaluaciones_seccion(request):
     GET /api/evaluaciones/?seccion=3&desde=2026-04-06&hasta=2026-04-11
     Un docente solo ve las secciones donde da clase.
     """
-    from academico.models import Institucion, Seccion
+    from academico.models import Seccion
 
     try:
         seccion = Seccion.objects.get(pk=request.query_params.get("seccion"))
@@ -962,7 +967,7 @@ def evaluaciones_seccion(request):
 
     qs = Instrumento.objects.filter(asignacion__seccion=seccion, fecha__range=(desde, hasta)).select_related(
         "asignacion__materia", "asignacion__docente").order_by("fecha", "asignacion__materia__nombre", "id")
-    inst = Institucion.objects.first() or Institucion()  # sin institución cargada: valores por defecto
+    inst = institucion_de(request)
     return Response({
         "seccion": str(seccion),
         # Reglas del colegio (las configura dirección en Gestión > Institución).

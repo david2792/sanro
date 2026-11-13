@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from nucleo.instituciones import institucion_por_defecto
 from personas.models import Alumno, Docente
 
 
@@ -49,25 +50,37 @@ class Institucion(models.Model):
 
 
 class AnioLectivo(models.Model):
-    anio = models.PositiveSmallIntegerField("Año", unique=True)
+    institucion = models.ForeignKey(Institucion, on_delete=models.PROTECT, related_name="anios_lectivos",
+                                    default=institucion_por_defecto, editable=False)
+    anio = models.PositiveSmallIntegerField("Año")
     fecha_inicio = models.DateField()
     fecha_fin = models.DateField()
     activo = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["-anio"]
+        constraints = [
+            models.UniqueConstraint(fields=["institucion", "anio"], name="anio_lectivo_unico_por_institucion"),
+        ]
         verbose_name = "año lectivo"
         verbose_name_plural = "años lectivos"
 
     def save(self, *args, **kwargs):
-        # Solo puede haber un año lectivo activo.
+        # Cada institución tiene un solo año lectivo activo.
         if self.activo:
-            AnioLectivo.objects.exclude(pk=self.pk).update(activo=False)
+            AnioLectivo.objects.filter(institucion_id=self.institucion_id).exclude(pk=self.pk).update(activo=False)
         super().save(*args, **kwargs)
 
     @classmethod
-    def actual(cls):
-        return cls.objects.filter(activo=True).first()
+    def actual(cls, institucion=None):
+        """Año activo de la institución (de cualquiera si no se indica, solo para uso interno)."""
+        qs = cls.objects.filter(activo=True)
+        if institucion is not None:
+            iid = getattr(institucion, "pk", institucion)
+            if iid is None:
+                return None
+            qs = qs.filter(institucion_id=iid)
+        return qs.first()
 
     def __str__(self):
         return str(self.anio)
@@ -108,11 +121,16 @@ class DiaNoLectivo(models.Model):
 class Nivel(models.Model):
     """Ej.: Educación Escolar Básica (3er ciclo), Educación Media."""
 
-    nombre = models.CharField(max_length=100, unique=True)
+    institucion = models.ForeignKey(Institucion, on_delete=models.PROTECT, related_name="niveles",
+                                    default=institucion_por_defecto, editable=False)
+    nombre = models.CharField(max_length=100)
     orden = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         ordering = ["orden"]
+        constraints = [
+            models.UniqueConstraint(fields=["institucion", "nombre"], name="nivel_unico_por_institucion"),
+        ]
         verbose_name_plural = "niveles"
 
     def __str__(self):
@@ -152,11 +170,16 @@ class Curso(models.Model):
 
 
 class Materia(models.Model):
-    nombre = models.CharField(max_length=100, unique=True)
+    institucion = models.ForeignKey(Institucion, on_delete=models.PROTECT, related_name="materias",
+                                    default=institucion_por_defecto, editable=False)
+    nombre = models.CharField(max_length=100)
     abreviatura = models.CharField(max_length=15, blank=True)
 
     class Meta:
         ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(fields=["institucion", "nombre"], name="materia_unica_por_institucion"),
+        ]
 
     def __str__(self):
         return self.nombre

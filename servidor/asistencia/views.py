@@ -7,15 +7,16 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from academico.models import AnioLectivo, Institucion, Matricula, Seccion
+from academico.models import AnioLectivo, Matricula, Seccion
 from academico.views import FiltroParamsMixin
 from personas.models import Docente
+from nucleo.instituciones import PorInstitucionMixin, institucion_de
 from personas.permisos import EsGestion, EsPersonal
 from .models import Justificacion, PermisoDocente, RegistroAsistencia, SesionClase
 from .serializers import JustificacionSerializer, PermisoDocenteSerializer, SesionClaseSerializer
 
 
-class SesionClaseViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
+class SesionClaseViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
     """
     POST /api/sesiones/  -> guarda (o actualiza) la lista de una clase.
     GET  /api/sesiones/?asignacion=5&fecha=2027-03-02
@@ -27,6 +28,7 @@ class SesionClaseViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
     serializer_class = SesionClaseSerializer
     permission_classes = [EsPersonal]
     filtros = ["asignacion", "fecha", "docente", "asignacion__seccion"]
+    campo_institucion = "asignacion__seccion__anio_lectivo__institucion"
 
     def get_queryset(self):
         qs = super().get_queryset()  # aplica ?asignacion=&fecha=
@@ -36,7 +38,8 @@ class SesionClaseViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
         return qs
 
 
-class JustificacionViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
+class JustificacionViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
+    campo_institucion = "matricula__anio_lectivo__institucion"
     queryset = Justificacion.objects.select_related("matricula__alumno")
     serializer_class = JustificacionSerializer
     permission_classes = [EsGestion]
@@ -46,7 +49,8 @@ class JustificacionViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
         serializer.save(registrado_por=self.request.user)
 
 
-class PermisoDocenteViewSet(FiltroParamsMixin, viewsets.ModelViewSet):
+class PermisoDocenteViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
+    campo_institucion = "docente__institucion"
     queryset = PermisoDocente.objects.select_related("docente")
     serializer_class = PermisoDocenteSerializer
     permission_classes = [EsGestion]
@@ -62,9 +66,10 @@ def resumen_dia(request):
     - Docentes que registraron clase, docentes con permiso y docentes sin registro.
     """
     fecha = request.query_params.get("fecha") or date.today().isoformat()
+    inst = institucion_de(request)
 
     sesiones = (
-        SesionClase.objects.filter(fecha=fecha)
+        SesionClase.objects.filter(fecha=fecha, asignacion__seccion__anio_lectivo__institucion_id=inst.pk)
         .select_related("asignacion__materia", "asignacion__seccion__curso", "docente")
         .annotate(
             total=Count("registros"),
@@ -85,13 +90,14 @@ def resumen_dia(request):
 
     con_clase = set(sesiones.values_list("docente_id", flat=True))
     con_permiso = set(PermisoDocente.objects.filter(
-        fecha_desde__lte=fecha, fecha_hasta__gte=fecha).values_list("docente_id", flat=True))
+        docente__institucion_id=inst.pk, fecha_desde__lte=fecha, fecha_hasta__gte=fecha).values_list("docente_id", flat=True))
     activos = list(Docente.objects.filter(
-        activo=True, asignaciones__seccion__anio_lectivo__activo=True).distinct())
+        institucion_id=inst.pk, activo=True, asignaciones__seccion__anio_lectivo__activo=True).distinct())
     # Si hay días de clase cargados, solo cuentan los docentes que tenían clase ese día.
     from academico.models import Asignacion
     dia = date.fromisoformat(fecha)
-    con_clase_programada = {a.docente_id for a in Asignacion.objects.filter(seccion__anio_lectivo__activo=True)
+    con_clase_programada = {a.docente_id for a in Asignacion.objects.filter(
+        seccion__anio_lectivo__institucion_id=inst.pk, seccion__anio_lectivo__activo=True)
                             if a.tiene_clase(dia)}
     activos = [d for d in activos if d.id in con_clase_programada]
 
@@ -118,7 +124,8 @@ def reporte_ausencias(request):
     """
     from .panel import _nombre_corto
 
-    anio = AnioLectivo.actual()
+    inst = institucion_de(request)
+    anio = AnioLectivo.actual(inst)
     if anio is None:
         raise ValidationError("No hay un año lectivo activo.")
     try:
@@ -199,11 +206,10 @@ def reporte_ausencias(request):
         "hora_inicio": r.sesion.hora_inicio, "hora_llegada": r.hora_llegada, "minutos_tarde": r.minutos_tarde,
     } for r in tardes]
 
-    inst = Institucion.objects.first()
     return Response({
-        "institucion": inst.nombre if inst else "", "anio": anio.anio, "desde": desde, "hasta": hasta,
+        "institucion": inst.nombre, "anio": anio.anio, "desde": desde, "hasta": hasta,
         "llegadas_tarde": llegadas_tarde,
-        "minimo_asistencia": inst.asistencia_minima if inst else 80,
+        "minimo_asistencia": inst.asistencia_minima,
         "totales": con_pct(regs.aggregate(**conteos)),
         "secciones": por_seccion, "cursos": por_curso, "meses": por_mes, "dias": por_dia,
         "materias": por_materia, "alumnos": alumnos,
@@ -223,4 +229,4 @@ def panel(request):
     from .panel import panel as calcular
 
     fecha = request.query_params.get("fecha")
-    return Response(calcular(request.user, date.fromisoformat(fecha) if fecha else None))
+    return Response(calcular(request.user, date.fromisoformat(fecha) if fecha else None, institucion_de(request)))

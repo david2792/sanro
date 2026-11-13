@@ -23,12 +23,12 @@ def _pct(a, b):
 class Datos:
     """Carga una sola vez todo lo necesario del año activo."""
 
-    def __init__(self, hoy=None):
+    def __init__(self, hoy=None, institucion=None):
         self.hoy = hoy or date.today()
-        self.anio = AnioLectivo.actual()
-        inst = Institucion.objects.first()
-        self.min_asistencia = inst.asistencia_minima if inst else 80
-        self.min_logro = inst.logro_minimo if inst else 60
+        self.institucion = institucion or Institucion()
+        self.anio = AnioLectivo.actual(self.institucion)
+        self.min_asistencia = self.institucion.asistencia_minima
+        self.min_logro = self.institucion.logro_minimo
         if not self.anio:
             return
 
@@ -260,10 +260,10 @@ def vista_colegio(d: Datos):
                     .values_list("id", "docente_id", "fecha"))
     con_registro = set(RegistroClase.objects.filter(sesion__asignacion__seccion__anio_lectivo=d.anio)
                        .values_list("sesion_id", flat=True))
-    permisos_hoy = set(PermisoDocente.objects.filter(fecha_desde__lte=hoy, fecha_hasta__gte=hoy).values_list("docente_id", flat=True))
+    permisos_hoy = set(PermisoDocente.objects.filter(docente__institucion_id=d.anio.institucion_id, fecha_desde__lte=hoy, fecha_hasta__gte=hoy).values_list("docente_id", flat=True))
     docentes_ids = {a.docente_id for a in d.asignaciones.values()}
     no_lectivos = set(DiaNoLectivo.objects.filter(anio_lectivo=d.anio).values_list("fecha", flat=True))
-    permisos = list(PermisoDocente.objects.filter(fecha_hasta__gte=hace14, fecha_desde__lte=hoy)
+    permisos = list(PermisoDocente.objects.filter(docente__institucion_id=d.anio.institucion_id, fecha_hasta__gte=hace14, fecha_desde__lte=hoy)
                     .values_list("docente_id", "fecha_desde", "fecha_hasta"))
     hechas = {(a_id, f) for a_id, f in SesionClase.objects.filter(
         asignacion__seccion__anio_lectivo=d.anio, fecha__gte=hace14).values_list("asignacion_id", "fecha")}
@@ -432,8 +432,8 @@ def vista_docente(d: Datos, docente):
     return salida
 
 
-def panel(usuario, hoy=None):
-    d = Datos(hoy)
+def panel(usuario, hoy=None, institucion=None):
+    d = Datos(hoy, institucion)
     resp = {"fecha": d.hoy.isoformat(), "anio": d.anio.anio if d.anio else None,
             "minimos": {"asistencia": d.min_asistencia, "logro": d.min_logro}}
     if not d.anio:
