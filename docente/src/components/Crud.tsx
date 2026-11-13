@@ -34,6 +34,8 @@ export type CrudConfig = {
   buscar?: (o: any) => string
   ordenar?: (a: any, b: any) => number
   soloLectura?: boolean
+  /** Sin botón Eliminar (registros que se desactivan o anulan en vez de borrarse). */
+  sinBorrar?: boolean
   /** Para concordar: "Nueva materia", "Materia creada". */
   femenino?: boolean
 }
@@ -236,7 +238,7 @@ export function FormularioCrud({ config, abierto, registro, fijos, onCerrar, onG
     <>
       <Hoja abierta={abierto} onCerrar={onCerrar} titulo={registro ? `Editar ${config.singular.toLowerCase()}` : `${config.femenino ? 'Nueva' : 'Nuevo'} ${config.singular.toLowerCase()}`}
         pie={<>
-          {registro && !config.soloLectura && <Boton type="button" variante="secundario" className="text-ausente" onClick={() => setBorrar(true)}>Eliminar</Boton>}
+          {registro && !config.soloLectura && !config.sinBorrar && <Boton type="button" variante="secundario" className="text-ausente" onClick={() => setBorrar(true)}>Eliminar</Boton>}
           <Boton type="submit" form="form-crud" className="flex-1" cargando={guardando}>Guardar</Boton>
         </>}>
         <form id="form-crud" onSubmit={guardar} className="grid grid-cols-2 gap-x-3 gap-y-4">

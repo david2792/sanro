@@ -15,3 +15,4 @@ Una decisión no se edita: si cambia, se escribe una nueva que la sustituye.
 | [0008](0008-justificativos.md) | Justificativos como trámite; la ausencia no se reemplaza | Aceptada |
 | [0009](0009-lista-borrador-confirmacion.md) | Lista con borrador y confirmación, correcciones con motivo y anulación | Aceptada |
 | [0010](0010-cierre-de-anio.md) | Estados del año lectivo y bloqueo de los años cerrados | Aceptada |
+| [0011](0011-aportes-voluntarios.md) | Aportes voluntarios a la ACE | Aceptada |

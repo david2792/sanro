@@ -84,25 +84,21 @@ Tipos de anecdótico: POSITIVO, NEGATIVO, NEUTRO. Un puntaje vacío (null) signi
 En la planilla cuenta el mayor entre `puntaje` y `recuperatorio`; `marcas` indica R (contó el recuperatorio) y T (entrega tardía).
 Los campos de puntaje que no se envían se conservan (enviar solo `puntaje` no borra el recuperatorio).
 
-## Aportes de padres (ACES)
-Usuarios con rol ACES (y gestión). Montos en guaraníes, sin decimales.
+## Aportes voluntarios a la ACE
+La comisión de la ACE (rol ACES) opera; la dirección solo consulta. Montos en guaraníes, sin decimales.
+Los aportes son voluntarios: no hay cuotas, vencimientos, deuda ni morosos (docs/decisiones/0011).
 | Uso | Método y URL |
 |---|---|
-| Conceptos (cuota mensual, aporte único…) | `/api/aportes/conceptos/` {nombre, periodicidad MENSUAL/UNICO, monto, mes_inicio, mes_fin, dia_vencimiento, fecha_vencimiento, cursos:[ids]} |
-| Exoneraciones | `/api/aportes/exoneraciones/` {matricula, concepto, motivo} |
-| Registrar recibo | POST `/api/aportes/pagos/` {matricula, fecha, medio, referencia, pagado_por, detalles:[{concepto, mes, monto}]} |
-| Anular recibo (no se borran ni editan) | POST `/api/aportes/pagos/{id}/anular/` {motivo} |
-| Panel con totales y gráficos | GET `/api/aportes/panel/` |
-| Resumen por sección / planilla de una sección | GET `/api/aportes/secciones/` · `/api/aportes/secciones/{id}/` |
-| Rendición de recaudación | GET `/api/aportes/reportes/recaudacion/?desde=&hasta=&seccion=` |
-| Alumnos con cuotas vencidas | GET `/api/aportes/reportes/morosos/?seccion=` |
+| Datos de la ACE (emisora de los recibos) | GET/PUT `/api/aportes/ace/` {denominacion, ruc, reconocimiento, domicilio, telefono, email} |
+| Conceptos (monto sugerido opcional) | `/api/aportes/conceptos/` {nombre, tipo, monto_sugerido, descripcion, activo} |
+| Buscar familia para el recibo | GET `/api/aportes/familias/?q=` (mínimo 3 letras; solo nombres) |
+| Emitir recibo | POST `/api/aportes/recibos/` {fecha, aportante_nombre, aportante_documento, tutor, matricula, medio, referencia, destino_restringido, observacion, serie, lineas:[{concepto, monto, descripcion}]} |
+| Anular / revertir (no se editan ni borran) | POST `/api/aportes/recibos/{id}/anular/` · `/revertir/` {motivo} |
+| Panel con totales | GET `/api/aportes/panel/` |
+| Rendición de lo recaudado | GET `/api/aportes/reportes/recaudacion/?desde=&hasta=` |
 
-Lo habitual es un **monto total** (periodicidad UNICO, ej. 200000) que la familia paga en partes;
-sin `fecha_vencimiento` se puede completar hasta el fin del año lectivo y recién ahí el saldo cuenta como vencido.
-Cada alumno informa `pagado`, `saldo`, `deuda` (lo vencido sin pagar) y `avance`
-(COMPLETO, PARCIAL, SIN_PAGOS, EXONERADO). `/api/aportes/reportes/morosos/?incluir=saldo` lista todos los saldos.
-Los recibos se numeran solos (correlativo por año). Una cuota puede pagarse en partes.
-Quien se matricula a mitad de año no debe los meses anteriores a su matrícula.
+Tipos de concepto: APORTE_SOCIAL, DONACION, DONACION_ESPECIE (exige descripción), ACTIVIDAD, EVENTO, OTRO.
+Los recibos se numeran solos por ACE, serie y ejercicio, e incluyen el importe en letras y un código de verificación.
 
 ## Reporte de ausencias
 GET `/api/reportes/ausencias/?desde=&hasta=` (gestión): inasistencia por sección, curso, mes, día de la semana,
@@ -136,7 +132,7 @@ Si no hay ninguna, el sistema no inventa un valor: responde 404. Ver `docs/decis
 - DIRECTOR, COORDINADOR, SECRETARIA: administran todo.
 - DOCENTE: consulta datos y solo llama lista en sus propias clases.
 - TUTOR: reservado para el portal de padres (fase 3).
-- ACES: solo el módulo de aportes; no ve asistencia, notas ni legajos.
+- ACES: solo el módulo de aportes (opera); no ve asistencia, notas ni legajos. La dirección consulta los aportes sin modificarlos.
 
 ## Pruebas
 `python manage.py test`

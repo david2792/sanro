@@ -1,32 +1,42 @@
 from django.contrib import admin
 
-from .models import ConceptoAporte, DetallePago, Exoneracion, Pago
+from .models import AsociacionACE, ConceptoAporte, LineaRecibo, Recibo
+
+
+@admin.register(AsociacionACE)
+class AsociacionACEAdmin(admin.ModelAdmin):
+    list_display = ("denominacion", "institucion", "ruc", "estado")
 
 
 @admin.register(ConceptoAporte)
 class ConceptoAporteAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "anio_lectivo", "periodicidad", "monto", "activo")
-    list_filter = ("anio_lectivo", "periodicidad", "activo")
-    filter_horizontal = ("cursos",)
+    list_display = ("nombre", "tipo", "anio_lectivo", "monto_sugerido", "activo")
+    list_filter = ("anio_lectivo", "tipo", "activo")
 
 
-class DetalleInline(admin.TabularInline):
-    model = DetallePago
+class LineaInline(admin.TabularInline):
+    model = LineaRecibo
     extra = 0
 
+    def has_change_permission(self, request, obj=None):
+        return False
 
-@admin.register(Pago)
-class PagoAdmin(admin.ModelAdmin):
-    list_display = ("numero", "anio_lectivo", "fecha", "matricula", "medio", "anulado")
-    list_filter = ("anio_lectivo", "medio", "anulado")
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Recibo)
+class ReciboAdmin(admin.ModelAdmin):
+    """Los recibos no se editan ni se borran: se anulan o revierten desde el sistema."""
+
+    list_display = ("numero", "serie", "ejercicio", "fecha", "aportante_nombre", "medio", "estado")
+    list_filter = ("ejercicio", "serie", "medio", "estado")
     date_hierarchy = "fecha"
-    raw_id_fields = ("matricula",)
-    readonly_fields = ("numero", "anio_lectivo", "registrado_por", "anulado_por", "anulado_en", "creado")
-    inlines = [DetalleInline]
+    search_fields = ("aportante_nombre", "aportante_documento", "numero")
+    inlines = [LineaInline]
 
+    def has_change_permission(self, request, obj=None):
+        return False
 
-@admin.register(Exoneracion)
-class ExoneracionAdmin(admin.ModelAdmin):
-    list_display = ("matricula", "concepto", "motivo")
-    list_filter = ("concepto",)
-    raw_id_fields = ("matricula",)
+    def has_delete_permission(self, request, obj=None):
+        return False

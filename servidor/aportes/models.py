@@ -1,36 +1,70 @@
-from datetime import date
+"""
+Aportes voluntarios y donaciones a la ACE (plan maestro 2.4, 2.5, 14.5 y 14.6;
+docs/decisiones/0011-aportes-voluntarios.md).
 
+- La ACE es una entidad distinta de la institución: emite sus propios recibos.
+- Los aportes son voluntarios: no hay cuotas, vencimientos, deuda, morosos ni exoneraciones, y la falta de
+  aporte nunca restringe matrícula, asistencia, notas ni documentos.
+- Los recibos no se borran ni se editan: se anulan o revierten con motivo, y su número no se reutiliza.
+Montos en guaraníes, enteros.
+"""
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 
-from academico.models import AnioLectivo, Curso, Matricula
+from academico.models import AnioLectivo, Institucion, Matricula
+from .letras import importe_en_letras
+
+
+class AsociacionACE(models.Model):
+    """Asociación de Cooperación Escolar vinculada a la institución (Ley 4853/2013)."""
+
+    class Estado(models.TextChoices):
+        ACTIVA = "ACTIVA", "Activa"
+        INACTIVA = "INACTIVA", "Inactiva"
+
+    institucion = models.ForeignKey(Institucion, on_delete=models.PROTECT, related_name="asociaciones_ace")
+    denominacion = models.CharField("Denominación", max_length=200)
+    ruc = models.CharField("RUC", max_length=20, blank=True)
+    reconocimiento = models.CharField("Resolución de reconocimiento", max_length=120, blank=True)
+    domicilio = models.CharField(max_length=200, blank=True)
+    telefono = models.CharField("Teléfono", max_length=30, blank=True)
+    email = models.EmailField(blank=True)
+    estado = models.CharField(max_length=8, choices=Estado.choices, default=Estado.ACTIVA)
+
+    class Meta:
+        ordering = ["institucion", "denominacion"]
+        verbose_name = "asociación de cooperación escolar"
+        verbose_name_plural = "asociaciones de cooperación escolar"
+
+    @classmethod
+    def de_institucion(cls, institucion_id):
+        return cls.objects.filter(institucion_id=institucion_id, estado=cls.Estado.ACTIVA).order_by("id").first()
+
+    def __str__(self):
+        return self.denominacion
 
 
 class ConceptoAporte(models.Model):
-    """
-    Lo que cobra la ACES en un año: un monto total (ej. Gs. 200.000 que la familia
-    paga en partes), una cuota mensual, la cuota de graduación…
-    Los montos van en guaraníes (sin decimales).
-    """
+    """Para qué se aporta: aporte social, una actividad, un evento, una donación… El monto es solo sugerido."""
 
-    class Periodicidad(models.TextChoices):
-        MENSUAL = "MENSUAL", "Cuota mensual"
-        UNICO = "UNICO", "Monto total"
+    class Tipo(models.TextChoices):
+        APORTE_SOCIAL = "APORTE_SOCIAL", "Aporte social voluntario"
+        DONACION = "DONACION", "Donación monetaria"
+        DONACION_ESPECIE = "DONACION_ESPECIE", "Donación en especie"
+        ACTIVIDAD = "ACTIVIDAD", "Aporte para una actividad"
+        EVENTO = "EVENTO", "Recaudación de evento"
+        OTRO = "OTRO", "Otro ingreso permitido"
 
-    anio_lectivo = models.ForeignKey(AnioLectivo, on_delete=models.PROTECT, related_name="conceptos_aporte")
+    ace = models.ForeignKey(AsociacionACE, on_delete=models.PROTECT, related_name="conceptos")
+    anio_lectivo = models.ForeignKey(AnioLectivo, on_delete=models.PROTECT, related_name="conceptos_aporte",
+                                     help_text="Ejercicio al que corresponde.")
     nombre = models.CharField(max_length=100)
-    periodicidad = models.CharField(max_length=7, choices=Periodicidad.choices, default=Periodicidad.UNICO)
-    monto = models.PositiveIntegerField("Monto (Gs.)", help_text="Total del año, o por mes si es cuota mensual.")
-    mes_inicio = models.PositiveSmallIntegerField("Primer mes", default=3)
-    mes_fin = models.PositiveSmallIntegerField("Último mes", default=11)
-    dia_vencimiento = models.PositiveSmallIntegerField(
-        "Día de vencimiento", default=10, help_text="Día del mes en que vence cada cuota mensual.")
-    fecha_vencimiento = models.DateField(
-        null=True, blank=True, help_text="Solo monto total: hasta cuándo se puede completar. Vacío = fin del año lectivo.")
-    cursos = models.ManyToManyField(
-        Curso, blank=True, related_name="conceptos_aporte",
-        help_text="Vacío = lo pagan todos los cursos.")
+    tipo = models.CharField(max_length=16, choices=Tipo.choices, default=Tipo.APORTE_SOCIAL)
+    monto_sugerido = models.PositiveIntegerField(
+        "Monto sugerido (Gs.)", null=True, blank=True,
+        help_text="Solo orientativo: el aporte es voluntario y puede ser de cualquier monto.")
+    descripcion = models.TextField("Descripción", blank=True)
     activo = models.BooleanField(default=True)
 
     class Meta:
@@ -40,98 +74,89 @@ class ConceptoAporte(models.Model):
         verbose_name_plural = "conceptos de aporte"
 
     def clean(self):
-        if self.monto is not None and self.monto <= 0:
-            raise ValidationError("El monto debe ser mayor a cero.")
-        if self.periodicidad == self.Periodicidad.MENSUAL:
-            if not (1 <= self.mes_inicio <= self.mes_fin <= 12):
-                raise ValidationError("Los meses deben ir de 1 a 12 y el primero no puede ser posterior al último.")
-            if not (1 <= self.dia_vencimiento <= 28):
-                raise ValidationError("El día de vencimiento debe estar entre 1 y 28.")
-
-    def cuotas(self):
-        """[(mes, vencimiento)] — mes es None en un monto total."""
-        anio = self.anio_lectivo.anio
-        if self.periodicidad == self.Periodicidad.UNICO:
-            return [(None, self.fecha_vencimiento or self.anio_lectivo.fecha_fin)]
-        return [(m, date(anio, m, self.dia_vencimiento)) for m in range(self.mes_inicio, self.mes_fin + 1)]
+        if self.monto_sugerido is not None and self.monto_sugerido <= 0:
+            raise ValidationError({"monto_sugerido": "Si se indica, el monto sugerido debe ser mayor a cero."})
 
     def __str__(self):
         return f"{self.nombre} {self.anio_lectivo}"
 
 
-class Exoneracion(models.Model):
-    """Alumno que no paga un concepto (beca, hermanos, situación económica…)."""
-
-    matricula = models.ForeignKey(Matricula, on_delete=models.CASCADE, related_name="exoneraciones")
-    concepto = models.ForeignKey(ConceptoAporte, on_delete=models.CASCADE, related_name="exoneraciones")
-    motivo = models.CharField(max_length=200)
-    registrado_por = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
-    creado = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ("matricula", "concepto")
-        verbose_name = "exoneración"
-        verbose_name_plural = "exoneraciones"
-
-    def __str__(self):
-        return f"{self.matricula.alumno} - {self.concepto}"
-
-
-class Pago(models.Model):
+class Recibo(models.Model):
     """
-    Un recibo. El número es correlativo por año lectivo y no se reutiliza:
-    un recibo mal hecho no se borra, se anula (queda en los reportes como anulado).
+    Recibo interno de la ACE a nombre del aportante. Numeración correlativa por ACE, serie y ejercicio.
+    No es una factura tributaria.
     """
+
+    class Estado(models.TextChoices):
+        EMITIDO = "EMITIDO", "Emitido"
+        ANULADO = "ANULADO", "Anulado"
+        REVERTIDO = "REVERTIDO", "Revertido (el dinero se devolvió o no se acreditó)"
 
     class Medio(models.TextChoices):
         EFECTIVO = "EFECTIVO", "Efectivo"
         TRANSFERENCIA = "TRANSFERENCIA", "Transferencia"
+        CHEQUE = "CHEQUE", "Cheque"
+        ESPECIE = "ESPECIE", "En especie"
         OTRO = "OTRO", "Otro"
 
-    anio_lectivo = models.ForeignKey(AnioLectivo, on_delete=models.PROTECT, editable=False, related_name="pagos")
+    ace = models.ForeignKey(AsociacionACE, on_delete=models.PROTECT, related_name="recibos")
+    anio_lectivo = models.ForeignKey(AnioLectivo, on_delete=models.PROTECT, editable=False, related_name="recibos")
+    serie = models.CharField(max_length=5, default="A")
+    ejercicio = models.PositiveSmallIntegerField(editable=False)
     numero = models.PositiveIntegerField("N° de recibo", editable=False)
-    matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="pagos")
     fecha = models.DateField()
+    aportante_nombre = models.CharField("Aportante", max_length=150)
+    aportante_documento = models.CharField("Documento del aportante", max_length=20, blank=True)
+    tutor = models.ForeignKey("personas.Tutor", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    matricula = models.ForeignKey(Matricula, null=True, blank=True, on_delete=models.PROTECT, related_name="recibos",
+                                  help_text="Alumno de referencia de la familia (opcional).")
     medio = models.CharField(max_length=13, choices=Medio.choices, default=Medio.EFECTIVO)
     referencia = models.CharField("Referencia / N° de transferencia", max_length=60, blank=True)
-    pagado_por = models.CharField("Entregado por", max_length=120, blank=True)
+    destino_restringido = models.CharField(
+        "Destino indicado por el aportante", max_length=200, blank=True,
+        help_text="Solo si el aportante pidió expresamente que se use para algo determinado.")
     observacion = models.CharField(max_length=200, blank=True)
-    anulado = models.BooleanField(default=False)
-    motivo_anulacion = models.CharField(max_length=200, blank=True)
+    estado = models.CharField(max_length=9, choices=Estado.choices, default=Estado.EMITIDO)
+    motivo_anulacion = models.CharField("Motivo de anulación o reversión", max_length=200, blank=True)
     anulado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     anulado_en = models.DateTimeField(null=True, blank=True)
+    codigo_verificacion = models.CharField(max_length=12, blank=True, editable=False)
     registrado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+")
     creado = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["-anio_lectivo__anio", "-numero"]
-        unique_together = ("anio_lectivo", "numero")
-        verbose_name = "pago (recibo)"
-        verbose_name_plural = "pagos (recibos)"
+        ordering = ["-ejercicio", "-numero"]
+        unique_together = ("ace", "serie", "ejercicio", "numero")
+        verbose_name = "recibo de aporte"
+        verbose_name_plural = "recibos de aporte"
 
     @property
     def total(self):
-        return sum(d.monto for d in self.detalles.all())
+        return sum(linea.monto for linea in self.lineas.all())
+
+    @property
+    def importe_letras(self):
+        return importe_en_letras(self.total)
 
     def __str__(self):
-        return f"Recibo {self.numero:05d}/{self.anio_lectivo} - {self.matricula.alumno}"
+        return f"Recibo {self.serie}-{self.numero:05d}/{self.ejercicio} - {self.aportante_nombre}"
 
 
-class DetallePago(models.Model):
-    """Qué cuota cubre el recibo. Una cuota puede pagarse en partes (varios detalles)."""
+class LineaRecibo(models.Model):
+    """Cada concepto que cubre el recibo. En una donación en especie, el monto es el valor documentado (puede ser 0)."""
 
-    pago = models.ForeignKey(Pago, on_delete=models.PROTECT, related_name="detalles")
-    concepto = models.ForeignKey(ConceptoAporte, on_delete=models.PROTECT, related_name="detalles")
-    mes = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Vacío en un monto total.")
+    recibo = models.ForeignKey(Recibo, on_delete=models.PROTECT, related_name="lineas")
+    concepto = models.ForeignKey(ConceptoAporte, on_delete=models.PROTECT, related_name="lineas")
     monto = models.PositiveIntegerField("Monto (Gs.)")
+    descripcion = models.CharField("Descripción", max_length=250, blank=True,
+                                   help_text="Obligatoria en donaciones en especie: qué se donó.")
 
     class Meta:
-        ordering = ["concepto", "mes"]
-        verbose_name = "detalle del pago"
-        verbose_name_plural = "detalles del pago"
+        ordering = ["recibo", "id"]
+        verbose_name = "línea del recibo"
+        verbose_name_plural = "líneas del recibo"
 
     def __str__(self):
-        return f"{self.concepto.nombre} {self.mes or ''}: {self.monto}"
+        return f"{self.concepto.nombre}: {self.monto}"

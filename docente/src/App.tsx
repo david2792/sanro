@@ -25,7 +25,7 @@ const Ausencias = lazy(() => import('./pages/gestion/Ausencias'))
 const Justificativos = lazy(() => import('./pages/gestion/Justificativos'))
 const PanelAportes = lazy(() => import('./pages/aportes/Panel'))
 const Cobrar = lazy(() => import('./pages/aportes/Cobrar'))
-const SeccionAportes = lazy(() => import('./pages/aportes/Seccion'))
+const RecibosAportes = lazy(() => import('./pages/aportes/Recibos'))
 const ReportesAportes = lazy(() => import('./pages/aportes/Reportes'))
 const ConfiguracionAportes = lazy(() => import('./pages/aportes/Configuracion'))
 
@@ -76,7 +76,7 @@ export default function App() {
                   <Route path="ausencias" element={<Protegida soloGestion><Ausencias /></Protegida>} />
                   <Route path="aportes" element={<Protegida soloAportes><PanelAportes /></Protegida>} />
                   <Route path="aportes/cobrar" element={<Protegida soloAportes><Cobrar /></Protegida>} />
-                  <Route path="aportes/secciones/:id" element={<Protegida soloAportes><SeccionAportes /></Protegida>} />
+                  <Route path="aportes/recibos" element={<Protegida soloAportes><RecibosAportes /></Protegida>} />
                   <Route path="aportes/reportes" element={<Protegida soloAportes><ReportesAportes /></Protegida>} />
                   <Route path="aportes/configuracion" element={<Protegida soloAportes><ConfiguracionAportes /></Protegida>} />
                 </Route>

@@ -37,10 +37,13 @@ Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de ac
 - Constancia de matrícula en PDF (va con las plantillas de Gestión documental).
 - ✅ 1.4 Estados del año lectivo y bloqueo de los años cerrados; reapertura solo por dirección con motivo (decisión 0010).
 
-## Fase 2 — Aportes voluntarios a la ACE ⬜
-- Rediseñar `aportes`: aportes voluntarios y donaciones; sin vencimientos, deuda, morosos ni exoneraciones.
-- Recibos emitidos por la ACE a nombre del aportante; serie y ejercicio; importe en letras.
-- Reportes de recaudación sin listas de familias que no aportaron.
+## Fase 2 — Aportes voluntarios a la ACE ✅ (13/11/2026)
+- ✅ Aportes voluntarios y donaciones (también en especie); sin vencimientos, deuda, morosos ni exoneraciones (decisión 0011).
+- ✅ Recibos de la ACE a nombre del aportante; serie y ejercicio; importe en letras; código de verificación;
+  anulación y reversión con motivo; "no válido como factura".
+- ✅ Panel y rendición de lo recaudado, sin listas de familias que no aportaron.
+- ✅ La ACE opera; la dirección solo consulta.
+- Recibo en borrador (plan 14.6) y ejercicio contable propio de la ACE: pasan a la fase de tesorería.
 
 ## Fase 3 — Evaluación y RSA ⬜
 - Catálogo curricular versionado (competencias, capacidades, indicadores oficiales).

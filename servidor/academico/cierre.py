@@ -35,9 +35,8 @@ RUTAS = {
     "pedagogico.LogroIndicador": "indicador.capacidad.unidad." + _A,
     "pedagogico.PlanAnual": _A,
     "aportes.ConceptoAporte": "anio_lectivo",
-    "aportes.Exoneracion": "concepto.anio_lectivo",
-    "aportes.Pago": "matricula.anio_lectivo",
-    "aportes.DetallePago": "pago.matricula.anio_lectivo",
+    "aportes.Recibo": "anio_lectivo",
+    "aportes.LineaRecibo": "recibo.anio_lectivo",
 }
 
 _rutas_por_modelo = {}

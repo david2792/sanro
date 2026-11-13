@@ -1,147 +1,141 @@
+"""Aportes voluntarios a la ACE (plan maestro 2.4, 2.5, 14.5 y 14.6; docs/decisiones/0011)."""
 from datetime import date
+from unittest import mock
 
 from rest_framework.test import APITestCase
 
-from academico.models import AnioLectivo, Asignacion, Curso, Materia, Matricula, Nivel, Seccion
-from asistencia.models import RegistroAsistencia, SesionClase
-from personas.models import Alumno, Docente, Usuario
+from academico.models import AnioLectivo, Curso, Matricula, Nivel, Seccion
+from personas.models import Alumno, AlumnoTutor, Tutor, Usuario
+from .letras import importe_en_letras, numero_a_letras
+from .models import AsociacionACE, ConceptoAporte, Recibo
 
 
-class AportesTest(APITestCase):
+class Base(APITestCase):
     def setUp(self):
         hoy = date.today()
-        self.mes = hoy.month
         self.aces = Usuario.objects.create_user("aces", password="x", rol="ACES")
         self.director = Usuario.objects.create_user("director", password="x", rol="DIRECTOR")
-        self.u_doc = Usuario.objects.create_user("profe", password="x", rol="DOCENTE")
-        doc = Docente.objects.create(usuario=self.u_doc, ci="9", nombres="Ana", apellidos="Gómez")
+        self.secretaria = Usuario.objects.create_user("secre", password="x", rol="SECRETARIA")
         self.anio = AnioLectivo.objects.create(anio=hoy.year, fecha_inicio=date(hoy.year, 1, 1),
-                                               fecha_fin=date(hoy.year, 12, 31), activo=True)
-        nivel = Nivel.objects.create(nombre="EM")
-        self.curso = Curso.objects.create(nivel=nivel, grado=1, nombre="1° Curso")
-        self.otro_curso = Curso.objects.create(nivel=nivel, grado=3, nombre="3° Curso")
-        self.sec = Seccion.objects.create(anio_lectivo=self.anio, curso=self.curso)
-        self.m = [Matricula.objects.create(
-            alumno=Alumno.objects.create(ci=str(i), nombres="A", apellidos=f"X{i}"),
-            seccion=self.sec, fecha=date(hoy.year, 1, 1), numero_lista=i) for i in (1, 2, 3)]
-        self.asig = Asignacion.objects.create(seccion=self.sec, materia=Materia.objects.create(nombre="Mate"), docente=doc)
+                                               fecha_fin=date(hoy.year, 12, 31), estado="ACTIVO", activo=True)
+        sec = Seccion.objects.create(anio_lectivo=self.anio, curso=Curso.objects.create(
+            nivel=Nivel.objects.create(nombre="EM"), grado=1, nombre="1° Curso"))
+        alumno = Alumno.objects.create(ci="111", nombres="Lucía", apellidos="Benítez")
+        self.mat = Matricula.objects.create(alumno=alumno, seccion=sec, fecha=date(hoy.year, 1, 1))
+        Matricula.objects.create(alumno=Alumno.objects.create(ci="222", nombres="Mateo", apellidos="Ruiz"),
+                                 seccion=sec, fecha=date(hoy.year, 1, 1))
+        self.tutor = Tutor.objects.create(ci="999", nombres="Rosa", apellidos="Benítez")
+        AlumnoTutor.objects.create(alumno=alumno, tutor=self.tutor, parentesco="Madre", es_principal=True)
+        self.login(self.aces)
+        self.assertEqual(self.client.put("/api/aportes/ace/", {"denominacion": "ACE Colegio San Roque",
+                                                                "ruc": "80000000-1"}).status_code, 200)
+        self.social = self.client.post("/api/aportes/conceptos/", {
+            "nombre": "Aporte social", "tipo": "APORTE_SOCIAL", "monto_sugerido": 50000}, format="json").data["id"]
+        self.especie = self.client.post("/api/aportes/conceptos/", {
+            "nombre": "Donaciones en especie", "tipo": "DONACION_ESPECIE"}, format="json").data["id"]
 
     def login(self, u):
         r = self.client.post("/api/auth/token/", {"username": u.username, "password": "x"})
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + r.data["access"])
 
-    def pagar(self, matricula, concepto, monto, mes=None):
-        return self.client.post("/api/aportes/pagos/", {
-            "matricula": matricula.id, "fecha": date.today().isoformat(), "medio": "EFECTIVO",
-            "detalles": [{"concepto": concepto, "mes": mes, "monto": monto}]}, format="json")
+    def emitir(self, monto=30000, **extra):
+        datos = {"fecha": date.today().isoformat(), "aportante_nombre": "Rosa Benítez", "medio": "EFECTIVO",
+                 "lineas": [{"concepto": self.social, "monto": monto}], **extra}
+        return self.client.post("/api/aportes/recibos/", datos, format="json")
 
-    def test_permisos(self):
-        self.login(self.aces)
-        self.assertEqual(self.client.get("/api/alumnos/").status_code, 403)
-        self.assertEqual(self.client.get("/api/reportes/panel/").status_code, 403)
-        self.assertEqual(self.client.get("/api/reportes/ausencias/").status_code, 403)
-        self.assertEqual(self.client.get("/api/aportes/panel/").status_code, 200)
-        self.login(self.u_doc)
-        self.assertEqual(self.client.get("/api/aportes/panel/").status_code, 403)
-        self.assertEqual(self.client.get("/api/aportes/pagos/").status_code, 403)
 
-    def test_flujo_aportes(self):
-        self.login(self.aces)
-        # Cuota mensual de un solo mes (el actual, vencida el día 1) para todos los cursos.
-        c = self.client.post("/api/aportes/conceptos/", {
-            "nombre": "Cuota", "periodicidad": "MENSUAL", "monto": 20000,
-            "mes_inicio": self.mes, "mes_fin": self.mes, "dia_vencimiento": 1}, format="json")
-        self.assertEqual(c.status_code, 201, c.data)
-        self.assertEqual(c.data["anio_lectivo"], self.anio.id)
-        cid = c.data["id"]
-        # Un concepto de otro curso no le corresponde a esta sección.
-        g = self.client.post("/api/aportes/conceptos/", {
-            "nombre": "Graduación", "periodicidad": "UNICO", "monto": 50000, "cursos": [self.otro_curso.id]},
-            format="json")
-        self.assertEqual(g.status_code, 201, g.data)
-        self.assertEqual(self.pagar(self.m[0], g.data["id"], 50000).status_code, 400)
-
-        r1 = self.pagar(self.m[0], cid, 20000, self.mes)
+class RecibosTest(Base):
+    def test_emitir_recibo_correlativo_con_letras_y_verificacion(self):
+        r1 = self.emitir(30000, tutor=self.tutor.id, matricula=self.mat.id, aportante_documento="999")
         self.assertEqual(r1.status_code, 201, r1.data)
-        self.assertEqual(r1.data["numero"], 1)
-        self.assertEqual(r1.data["total"], 20000)
-        self.assertEqual(self.pagar(self.m[0], cid, 1000, self.mes).status_code, 400)  # ya pagada
-        self.assertEqual(self.pagar(self.m[1], cid, 5000).status_code, 400)  # falta el mes
-        r2 = self.pagar(self.m[1], cid, 5000, self.mes)  # pago parcial
-        self.assertEqual(r2.data["numero"], 2)
-        e = self.client.post("/api/aportes/exoneraciones/", {"matricula": self.m[2].id, "concepto": cid,
-                                                             "motivo": "Hermanos"}, format="json")
-        self.assertEqual(e.status_code, 201, e.data)
-        self.assertEqual(self.pagar(self.m[2], cid, 20000, self.mes).status_code, 400)  # exonerado
+        self.assertEqual((r1.data["serie"], r1.data["numero"], r1.data["ejercicio"]), ("A", 1, self.anio.anio))
+        self.assertEqual(r1.data["importe_letras"], "Treinta mil guaraníes")
+        self.assertEqual(len(r1.data["codigo_verificacion"]), 10)
+        self.assertIn("No válido como factura", r1.data["leyenda"])
+        self.assertEqual(r1.data["ace_nombre"], "ACE Colegio San Roque")
+        self.assertEqual(self.emitir(15000).data["numero"], 2)
+        self.assertEqual(self.emitir(1000, serie="B").data["numero"], 1)  # cada serie tiene su correlativo
 
-        sec = self.client.get(f"/api/aportes/secciones/{self.sec.id}/").data
-        estados = {a["matricula"]: (a["estado"], a["deuda"]) for a in sec["alumnos"]}
-        self.assertEqual(estados[self.m[0].id], ("AL_DIA", 0))
-        self.assertEqual(estados[self.m[1].id], ("CON_DEUDA", 15000))
-        self.assertEqual(estados[self.m[2].id], ("EXONERADO", 0))
-        self.assertEqual([x["etiqueta"] for x in sec["columnas"]], [sec["alumnos"][0]["cuotas"][0]["etiqueta"]])
+    def test_monto_libre_aunque_haya_sugerido(self):
+        self.assertEqual(self.emitir(5000).status_code, 201)  # menos que lo sugerido: es voluntario
+        self.assertEqual(self.emitir(0).status_code, 400)
 
-        t = self.client.get("/api/aportes/panel/").data["totales"]
-        self.assertEqual((t["recaudado"], t["exigible"], t["deuda"], t["cumplimiento"]), (25000, 40000, 15000, 62.5))
+    def test_donacion_en_especie(self):
+        sin = self.emitir(lineas=[{"concepto": self.especie, "monto": 0}])
+        self.assertEqual(sin.status_code, 400)  # hay que describir qué se donó
+        r = self.emitir(lineas=[{"concepto": self.especie, "monto": 0, "descripcion": "2 resmas de papel"}],
+                        medio="ESPECIE")
+        self.assertEqual((r.status_code, r.data["total"]), (201, 0))
 
-        # No se puede bajar el monto por debajo de lo ya cobrado.
-        self.assertEqual(self.client.patch(f"/api/aportes/conceptos/{cid}/", {"monto": 10000}, format="json").status_code, 400)
-        # Un recibo no se borra: se anula, y la cuota vuelve a quedar pendiente.
-        self.assertEqual(self.client.delete(f"/api/aportes/pagos/{r1.data['id']}/").status_code, 405)
-        self.assertEqual(self.client.post(f"/api/aportes/pagos/{r1.data['id']}/anular/", {}).status_code, 400)
-        an = self.client.post(f"/api/aportes/pagos/{r1.data['id']}/anular/", {"motivo": "Error de carga"})
-        self.assertTrue(an.data["anulado"])
-        morosos = self.client.get("/api/aportes/reportes/morosos/").data
-        self.assertEqual({a["matricula"] for a in morosos["alumnos"]}, {self.m[0].id, self.m[1].id})
-        self.assertEqual(self.pagar(self.m[0], cid, 20000, self.mes).data["numero"], 3)
+    def test_no_se_edita_ni_se_borra_se_anula_o_revierte(self):
+        r = self.emitir().data
+        url = f"/api/aportes/recibos/{r['id']}/"
+        self.assertEqual(self.client.patch(url, {"aportante_nombre": "Otro"}, format="json").status_code, 405)
+        self.assertEqual(self.client.delete(url).status_code, 405)
+        self.assertEqual(self.client.post(url + "anular/").status_code, 400)  # sin motivo
+        a = self.client.post(url + "anular/", {"motivo": "Se cargó a otra familia"})
+        self.assertEqual((a.data["estado"], a.data["numero"]), ("ANULADO", 1))
+        self.assertEqual(self.client.post(url + "revertir/", {"motivo": "x"}).status_code, 400)  # ya cerrado
+        self.assertEqual(self.emitir().data["numero"], 2)  # el número anulado no se reutiliza
+        t = self.emitir(medio="TRANSFERENCIA").data
+        rev = self.client.post(f"/api/aportes/recibos/{t['id']}/revertir/", {"motivo": "La transferencia no se acreditó"})
+        self.assertEqual(rev.data["estado"], "REVERTIDO")
 
-        rep = self.client.get("/api/aportes/reportes/recaudacion/").data
-        self.assertEqual(rep["total"], 25000)
-        self.assertEqual(rep["anulados"], {"cantidad": 1, "monto": 20000})
-        self.assertEqual(len(rep["recibos"]), 3)
+    def test_panel_y_rendicion_solo_cuentan_lo_vigente(self):
+        self.emitir(30000)
+        anulado = self.emitir(10000).data
+        self.client.post(f"/api/aportes/recibos/{anulado['id']}/anular/", {"motivo": "Error"})
+        p = self.client.get("/api/aportes/panel/").data
+        self.assertEqual((p["total"], p["recibos"], p["anulados_o_revertidos"]["monto"]), (30000, 1, 10000))
+        self.assertEqual(p["por_concepto"][0]["concepto"], "Aporte social")
+        r = self.client.get("/api/aportes/reportes/recaudacion/").data
+        self.assertEqual(r["total"], 30000)
+        self.assertEqual([x["estado"] for x in r["recibos"]], ["EMITIDO", "ANULADO"])
 
-    def test_monto_total_en_partes(self):
-        """Aporte de Gs. 200.000 que la familia va pagando de a poco."""
-        self.login(self.aces)
-        c = self.client.post("/api/aportes/conceptos/", {"nombre": "Aporte anual", "monto": 200000}, format="json")
-        self.assertEqual(c.status_code, 201, c.data)
-        self.assertEqual(c.data["periodicidad"], "UNICO")
-        cid = c.data["id"]
-        self.assertEqual(self.pagar(self.m[0], cid, 50000).status_code, 201)
-        self.assertEqual(self.pagar(self.m[0], cid, 80000).status_code, 201)
-        a = next(x for x in self.client.get(f"/api/aportes/secciones/{self.sec.id}/").data["alumnos"]
-                 if x["matricula"] == self.m[0].id)
-        # Vence a fin de año: pagó una parte, todavía no debe nada vencido.
-        self.assertEqual((a["cuotas"][0]["estado"], a["pagado"], a["saldo"], a["deuda"], a["estado"], a["avance"]),
-                         ("PARCIAL", 130000, 70000, 0, "AL_DIA", "PARCIAL"))
-        self.assertEqual(a["porcentaje_pagado"], 65.0)
-        excede = self.pagar(self.m[0], cid, 80000)
-        self.assertEqual(excede.status_code, 400)
-        self.assertIn("Gs. 70.000", str(excede.data))
-        self.assertEqual(self.pagar(self.m[0], cid, 70000).status_code, 201)
-        t = self.client.get("/api/aportes/panel/").data
-        self.assertEqual(t["totales"]["recaudado"], 200000)
-        self.assertEqual(t["cuotas"][0]["pagado"], 1)
-        # 3 alumnos x 200.000 = 600.000 esperados; se cobraron 200.000.
-        self.assertEqual((t["totales"]["total_anual"], t["totales"]["porcentaje_pagado"]), (600000, 33.3))
-        self.assertEqual((t["familias"]["completos"], t["familias"]["sin_pagos"]), (1, 2))
 
-    def test_reporte_ausencias(self):
-        hoy = date.today()
-        s = SesionClase.objects.create(asignacion=self.asig, docente=self.asig.docente, fecha=hoy)
-        for m, est in zip(self.m, "PAA"):
-            RegistroAsistencia.objects.create(sesion=s, matricula=m, estado=est)
-        # La tercera ausencia tiene un justificativo aprobado (la ausencia sigue siendo "A").
-        from asistencia import justificaciones as tramite
-        from asistencia.models import Justificacion
-        j = Justificacion.objects.create(matricula=self.m[2], fecha_desde=hoy, fecha_hasta=hoy, motivo="Reposo")
-        tramite.decidir(j, self.director, "APROBADO")
+class PrincipiosTest(Base):
+    def test_sin_deuda_morosos_ni_planillas_por_seccion(self):
+        for ruta in ("/api/aportes/reportes/morosos/", "/api/aportes/secciones/", "/api/aportes/exoneraciones/",
+                     "/api/aportes/pagos/"):
+            self.assertEqual(self.client.get(ruta).status_code, 404, ruta)
+        # Nada en las respuestas habla de deuda ni vencimientos.
+        self.emitir()
+        texto = str(self.client.get("/api/aportes/panel/").data) + str(self.client.get("/api/aportes/recibos/").data)
+        for palabra in ("deuda", "moroso", "vencid", "saldo", "exoner"):
+            self.assertNotIn(palabra, texto.lower())
+
+    def test_buscar_familia_no_revela_quien_aporto(self):
+        self.emitir(matricula=self.mat.id)
+        r = self.client.get("/api/aportes/familias/?q=Ben").data
+        self.assertEqual(r[0]["tutores"][0]["nombre"], "Rosa Benítez")
+        self.assertEqual(set(r[0]), {"matricula", "alumno", "seccion", "tutores"})
+        self.assertEqual(self.client.get("/api/aportes/familias/?q=Be").data, [])  # mínimo 3 letras
+
+    def test_la_ace_opera_la_direccion_solo_consulta(self):
         self.login(self.director)
-        r = self.client.get("/api/reportes/ausencias/")
-        self.assertEqual(r.status_code, 200, r.data)
-        fila = r.data["secciones"][0]
-        self.assertEqual((fila["registros"], fila["ausentes"], fila["justificadas"]), (3, 1, 1))
-        self.assertEqual(fila["inasistencia"], 66.7)
-        self.assertEqual(r.data["cursos"][0]["inasistencia"], 66.7)
-        self.assertEqual(r.data["alumnos"][0]["matricula"], self.m[1].id)
-        self.assertEqual(self.client.get("/api/reportes/ausencias/?desde=xx").status_code, 400)
+        self.assertEqual(self.client.get("/api/aportes/panel/").status_code, 200)
+        self.assertEqual(self.emitir().status_code, 403)
+        self.login(self.secretaria)
+        self.assertEqual(self.client.get("/api/aportes/panel/").status_code, 403)
+
+    def test_matricular_no_depende_de_aportes(self):
+        self.login(self.director)
+        nuevo = Alumno.objects.create(ci="333", nombres="Sofía", apellidos="Ramos")
+        r = self.client.post("/api/matriculas/", {"alumno": nuevo.id, "seccion": self.mat.seccion_id,
+                                                  "fecha": date.today().isoformat()})
+        self.assertEqual(r.status_code, 201, r.data)
+
+
+class LetrasTest(APITestCase):
+    def test_numeros(self):
+        casos = {1: "un", 21: "veintiún", 100: "cien", 101: "ciento un", 1000: "mil", 15000: "quince mil",
+                 200000: "doscientos mil", 1_000_000: "un millón", 2_350_500: "dos millones trescientos cincuenta mil quinientos"}
+        for n, texto in casos.items():
+            self.assertEqual(numero_a_letras(n), texto)
+        self.assertEqual(importe_en_letras(1_000_000), "Un millón de guaraníes")
+
+    def test_codigo_cambia_si_cambia_el_monto(self):
+        from .verificacion import codigo_verificacion
+
+        with mock.patch("django.conf.settings.SECRET_KEY", "clave"):
+            self.assertNotEqual(codigo_verificacion(1, "A", 2026, 5, 1000), codigo_verificacion(1, "A", 2026, 5, 10000))

@@ -48,8 +48,7 @@ router.register("anecdoticos", peda.RegistroAnecdoticoViewSet)
 router.register("instrumentos", peda.InstrumentoViewSet)
 # Aportes de padres (ACES)
 router.register("aportes/conceptos", apor.ConceptoAporteViewSet)
-router.register("aportes/exoneraciones", apor.ExoneracionViewSet)
-router.register("aportes/pagos", apor.PagoViewSet)
+router.register("aportes/recibos", apor.ReciboViewSet)
 # Registro normativo
 router.register("normativa/fuentes", norm.FuenteNormativaViewSet)
 router.register("normativa/reglas", norm.ReglaNormativaViewSet)
@@ -63,13 +62,10 @@ urlpatterns = [
     path("api/reportes/resumen-dia/", asis.resumen_dia),
     path("api/reportes/panel/", asis.panel),
     path("api/reportes/ausencias/", asis.reporte_ausencias),
+    path("api/aportes/ace/", apor.ace),
     path("api/aportes/panel/", apor.panel),
-    path("api/aportes/secciones/", apor.secciones),
-    path("api/aportes/secciones/<int:pk>/", apor.seccion),
-    path("api/aportes/cursos/", apor.cursos),
-    path("api/aportes/matriculas/", apor.matriculas),
+    path("api/aportes/familias/", apor.familias),
     path("api/aportes/reportes/recaudacion/", apor.reporte_recaudacion),
-    path("api/aportes/reportes/morosos/", apor.reporte_morosos),
     path("api/planilla/", peda.planilla),
     path("api/planes-anuales/", peda.planes_anuales),
     path("api/plan-anual/<int:asignacion_id>/", peda.plan_anual),

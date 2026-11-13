@@ -1,66 +1,81 @@
+// Datos de la ACE (emisora de los recibos) y conceptos de aporte del año.
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { CrudPage, type CrudConfig } from '../../components/Crud'
-import { Encabezado, Etiqueta } from '../../components/ui'
-import { fechaCorta, guaranies, MES_CORTO } from '../../lib/utils'
-import { AportesNav } from './comun'
-
-const MESES = MES_CORTO.slice(1).map((m, i) => ({ valor: String(i + 1), label: m }))
-const mensual = (v: Record<string, any>) => v.periodicidad !== 'UNICO'
+import { Boton, Campo, Encabezado, ErrorCaja, Input, Tarjeta, useAviso } from '../../components/ui'
+import { api } from '../../lib/api'
+import { guaranies } from '../../lib/utils'
+import { AportesNav, TIPOS_CONCEPTO } from './comun'
 
 const CONCEPTOS: CrudConfig = {
-  titulo: 'Conceptos de aporte', singular: 'Concepto', ruta: '/aportes/conceptos/',
-  descripcion: 'Lo que cobra la ACES este año. Un monto total (ej. Gs. 200.000) se puede pagar en partes.',
+  titulo: 'Conceptos de aporte', singular: 'Concepto', ruta: '/aportes/conceptos/', sinBorrar: true,
+  descripcion: 'El monto sugerido es solo orientativo: cada familia aporta lo que decide. Un concepto que ya no se usa se desactiva.',
   columnas: [
     { label: 'Concepto', valor: (o) => o.nombre, principal: true },
-    { label: 'Monto', valor: (o) => `${guaranies(o.monto)}${o.periodicidad === 'MENSUAL' ? ' por mes' : ''}` },
-    {
-      label: 'Período', valor: (o) => o.periodicidad === 'MENSUAL'
-        ? `Cuota mensual · ${MES_CORTO[o.mes_inicio]} a ${MES_CORTO[o.mes_fin]} · vence el ${o.dia_vencimiento}`
-        : `Monto total · ${o.fecha_vencimiento ? `completar hasta ${fechaCorta(o.fecha_vencimiento)}` : 'completar en el año'}`,
-    },
-    { label: 'Cursos', valor: (o) => (o.cursos_nombres.length ? o.cursos_nombres.join(', ') : 'Todos'), oculto_movil: true },
-    { label: 'Estado', valor: (o) => (o.activo ? <Etiqueta tono="verde">Activo</Etiqueta> : <Etiqueta>Inactivo</Etiqueta>), oculto_movil: true },
+    { label: 'Tipo', valor: (o) => o.tipo_nombre },
+    { label: 'Sugerido', valor: (o) => (o.monto_sugerido ? guaranies(o.monto_sugerido) : '—') },
+    { label: 'Activo', valor: (o) => (o.activo ? 'Sí' : 'No'), oculto_movil: true },
   ],
   campos: [
-    { name: 'nombre', label: 'Nombre', requerido: true, ayuda: 'Ej.: Aporte de padres, Cuota de graduación.' },
-    { name: 'periodicidad', label: 'Tipo', tipo: 'select', requerido: true, medio: true,
-      opciones: [{ valor: 'UNICO', label: 'Monto total (en partes)' }, { valor: 'MENSUAL', label: 'Cuota mensual' }] },
-    { name: 'monto', label: 'Monto', tipo: 'monto', requerido: true, medio: true,
-      ayuda: 'Total del año; si es cuota mensual, por mes.' },
-    { name: 'mes_inicio', label: 'Primer mes', tipo: 'select', opciones: MESES, requerido: true, medio: true, visible: mensual },
-    { name: 'mes_fin', label: 'Último mes', tipo: 'select', opciones: MESES, requerido: true, medio: true, visible: mensual },
-    { name: 'dia_vencimiento', label: 'Vence el día', tipo: 'numero', medio: true, visible: mensual, ayuda: 'De cada mes (1 a 28).' },
-    { name: 'fecha_vencimiento', label: 'Completar hasta', tipo: 'fecha', visible: (v) => !mensual(v),
-      ayuda: 'Fecha límite para terminar de pagar. Vacío: fin del año lectivo. Lo que falte después de esa fecha cuenta como deuda.' },
-    { name: 'cursos', label: 'Cursos que lo pagan', tipo: 'fk_multiple', fk: { ruta: '/aportes/cursos/', label: (o) => o.descripcion },
-      ayuda: 'Sin marcar ninguno: lo pagan todos.' },
-    { name: 'activo', label: 'Estado', tipo: 'si_no', ayuda: 'Concepto activo (se cobra y aparece en los reportes)' },
+    { name: 'nombre', label: 'Nombre', requerido: true },
+    { name: 'tipo', label: 'Tipo', tipo: 'select', opciones: TIPOS_CONCEPTO, requerido: true },
+    { name: 'monto_sugerido', label: 'Monto sugerido (opcional)', tipo: 'monto', medio: true },
+    { name: 'activo', label: 'Activo', tipo: 'si_no', medio: true },
+    { name: 'descripcion', label: 'Descripción', tipo: 'area' },
   ],
-  inicial: () => ({ periodicidad: 'UNICO', mes_inicio: '3', mes_fin: '11', dia_vencimiento: 10, cursos: [], activo: true }),
+  inicial: () => ({ tipo: 'APORTE_SOCIAL', activo: true }),
 }
 
-const EXONERACIONES: CrudConfig = {
-  titulo: 'Exoneraciones', singular: 'Exoneración', femenino: true, ruta: '/aportes/exoneraciones/',
-  columnas: [
-    { label: 'Alumno', valor: (o) => o.alumno, principal: true },
-    { label: 'Concepto', valor: (o) => o.concepto_nombre },
-    { label: 'Motivo', valor: (o) => o.motivo },
-  ],
-  campos: [
-    { name: 'matricula', label: 'Alumno', tipo: 'fk', requerido: true, fk: { ruta: '/aportes/matriculas/', label: (o) => `${o.alumno} — ${o.seccion}` } },
-    { name: 'concepto', label: 'Concepto', tipo: 'fk', requerido: true, fk: { ruta: '/aportes/conceptos/', label: (o) => o.nombre } },
-    { name: 'motivo', label: 'Motivo', requerido: true, ayuda: 'Ej.: hermanos en el colegio, situación económica, beca.' },
-  ],
+function DatosACE() {
+  const qc = useQueryClient()
+  const avisar = useAviso()
+  const ace = useQuery({ queryKey: ['aportes-ace'], queryFn: () => api('/aportes/ace/') })
+  const [datos, setDatos] = useState<Record<string, string> | null>(null)
+  const [guardando, setGuardando] = useState(false)
+  const valores = datos ?? ace.data ?? {}
+  const campo = (name: string, label: string) => (
+    <Campo label={label}><Input value={valores[name] ?? ''} onChange={(e) => setDatos({ ...valores, [name]: e.target.value })} /></Campo>
+  )
+
+  async function guardar() {
+    setGuardando(true)
+    try {
+      await api('/aportes/ace/', { method: 'PUT', body: valores })
+      await qc.invalidateQueries({ queryKey: ['aportes-ace'] })
+      setDatos(null)
+      avisar('Datos de la ACE guardados')
+    } catch (e) {
+      avisar(e instanceof Error ? e.message : 'No se pudo guardar.', 'error')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <Tarjeta className="mb-6 space-y-3">
+      <h2 className="font-bold">Asociación de Cooperación Escolar</h2>
+      <p className="text-sm text-grafito-500">Es la que emite los recibos. Sus fondos son distintos de los de la institución.</p>
+      <ErrorCaja error={ace.error} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        {campo('denominacion', 'Denominación')}
+        {campo('ruc', 'RUC')}
+        {campo('reconocimiento', 'Resolución de reconocimiento')}
+        {campo('domicilio', 'Domicilio')}
+        {campo('telefono', 'Teléfono')}
+        {campo('email', 'Correo')}
+      </div>
+      <Boton onClick={guardar} cargando={guardando} disabled={!valores.denominacion?.trim()}>Guardar</Boton>
+    </Tarjeta>
+  )
 }
 
 export default function ConfiguracionAportes() {
   return (
     <div>
-      <Encabezado titulo="Configuración de aportes" detalle="Conceptos que se cobran y alumnos exonerados." />
+      <Encabezado titulo="Configuración de aportes" />
       <AportesNav />
-      <div className="space-y-10">
-        <CrudPage config={CONCEPTOS} embebido />
-        <CrudPage config={EXONERACIONES} embebido />
-      </div>
+      <DatosACE />
+      <CrudPage embebido config={CONCEPTOS} />
     </div>
   )
 }

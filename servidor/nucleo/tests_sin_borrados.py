@@ -6,7 +6,7 @@ from django.db.models import ProtectedError
 from rest_framework.test import APITestCase
 
 from academico.models import AnioLectivo, Asignacion, Curso, Etapa, Materia, Matricula, Nivel, Seccion
-from aportes.models import DetallePago
+from aportes.models import LineaRecibo
 from asistencia.models import Justificacion, RegistroAsistencia, SesionClase
 from pedagogico.models import Instrumento, LogroIndicador, Puntaje, RegistroClase
 from personas.models import Alumno, Docente, Usuario
@@ -56,7 +56,7 @@ class SinBorradosTest(APITestCase):
         protegidas = [
             (RegistroAsistencia, "sesion"), (Justificacion, "matricula"), (RegistroClase, "sesion"),
             (Puntaje, "instrumento"), (LogroIndicador, "indicador"), (LogroIndicador, "matricula"),
-            (DetallePago, "pago"),
+            (LineaRecibo, "recibo"),
         ]
         for modelo, campo in protegidas:
             with self.subTest(f"{modelo.__name__}.{campo}"):

@@ -1,23 +1,32 @@
+"""
+API de aportes voluntarios a la ACE. Solo totales y recibos emitidos: no hay planillas por sección,
+deudas ni listas de familias que no aportaron (plan maestro 2.5 y 14.5).
+"""
 from collections import defaultdict
 from datetime import date
 
-from django.db.models import Sum
-from django.shortcuts import get_object_or_404
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from academico.models import AnioLectivo, Curso, Matricula, Seccion
+from academico.models import AnioLectivo, Matricula
 from academico.views import FiltroParamsMixin
-from personas.models import AlumnoTutor
 from nucleo.instituciones import PorInstitucionMixin, institucion_de
-from personas.permisos import EsAcesOGestion
-from .estado import (AL_DIA, COMPLETO, CON_DEUDA, EXONERADO, EXONERADO_TOTAL, MESES, PAGADO, PAGO_PARCIAL, PARCIAL,
-                     POR_VENCER, SIN_CUOTAS, SIN_PAGOS, EstadoAportes, nombre_seccion, pct)
-from .models import ConceptoAporte, DetallePago, Exoneracion, Pago
-from .serializers import ConceptoAporteSerializer, ExoneracionSerializer, PagoSerializer
+from personas.models import AlumnoTutor
+from personas.permisos import PermisoACE
+from .models import AsociacionACE, ConceptoAporte, LineaRecibo, Recibo
+from .serializers import AsociacionACESerializer, ConceptoAporteSerializer, ReciboSerializer, cerrar_recibo
+
+
+def _ace(request, obligatoria=True):
+    ace = AsociacionACE.de_institucion(institucion_de(request).pk)
+    if ace is None and obligatoria:
+        raise ValidationError("Primero cargá los datos de la ACE (Aportes › Configuración).")
+    return ace
 
 
 def _anio(request):
@@ -36,25 +45,28 @@ def _fecha(valor, por_defecto):
         raise ValidationError(f"Fecha inválida: {valor}. Usá el formato AAAA-MM-DD.")
 
 
-def _secciones(anio):
-    return list(Seccion.objects.filter(anio_lectivo=anio).select_related("curso__nivel")
-                .order_by("curso__nivel__orden", "curso__grado", "letra", "turno"))
+@api_view(["GET", "PUT"])
+@permission_classes([PermisoACE])
+def ace(request):
+    """Datos de la ACE de la institución: GET (null si todavía no se cargó) o PUT para cargarlos/actualizarlos."""
+    actual = _ace(request, obligatoria=False)
+    if request.method == "GET":
+        return Response(AsociacionACESerializer(actual).data if actual else None)
+    s = AsociacionACESerializer(actual, data=request.data, partial=actual is not None)
+    s.is_valid(raise_exception=True)
+    s.save(institucion=institucion_de(request))
+    return Response(s.data)
 
-
-def _encabezado(anio):
-    return {"institucion": anio.institucion.nombre, "anio": anio.anio, "generado": timezone.localtime().isoformat()}
-
-
-# ------------------------------------------------------------------ ABM
 
 class ConceptoAporteViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
-    """Conceptos que cobra la ACES. Sin ?anio_lectivo= muestra los del año activo."""
+    """Conceptos de aporte. Sin ?anio_lectivo= muestra los del año activo. No se borran: se desactivan."""
 
-    queryset = ConceptoAporte.objects.select_related("anio_lectivo").prefetch_related("cursos")
+    queryset = ConceptoAporte.objects.select_related("anio_lectivo")
     serializer_class = ConceptoAporteSerializer
-    permission_classes = [EsAcesOGestion]
-    filtros = ["anio_lectivo", "activo"]
-    campo_institucion = "anio_lectivo__institucion"
+    permission_classes = [PermisoACE]
+    filtros = ["anio_lectivo", "activo", "tipo"]
+    campo_institucion = "ace__institucion"
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -62,37 +74,23 @@ class ConceptoAporteViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.Mod
             qs = qs.filter(anio_lectivo__activo=True)
         return qs
 
-
-class ExoneracionViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelViewSet):
-    campo_institucion = "concepto__anio_lectivo__institucion"
-    queryset = Exoneracion.objects.select_related("matricula__alumno", "matricula__seccion__curso", "concepto").order_by(
-        "concepto__nombre", "matricula__alumno__apellidos", "matricula__alumno__nombres")
-    serializer_class = ExoneracionSerializer
-    permission_classes = [EsAcesOGestion]
-    filtros = ["matricula", "concepto", "matricula__seccion"]
-
-    def get_queryset(self):
-        return super().get_queryset().filter(concepto__anio_lectivo__activo=True)
-
     def perform_create(self, serializer):
-        serializer.save(registrado_por=self.request.user)
+        serializer.save(ace=_ace(self.request))
 
 
-class PagoViewSet(PorInstitucionMixin, FiltroParamsMixin, mixins.CreateModelMixin, mixins.ListModelMixin,
-                  mixins.RetrieveModelMixin, viewsets.GenericViewSet):
+class ReciboViewSet(PorInstitucionMixin, FiltroParamsMixin, mixins.CreateModelMixin, mixins.ListModelMixin,
+                    mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     """
-    Recibos. No se editan ni se borran: un recibo equivocado se anula.
-    GET  /api/aportes/pagos/?matricula=12&desde=2027-03-01&hasta=2027-03-31
-    POST /api/aportes/pagos/{id}/anular/ {motivo}
+    Recibos. No se editan ni se borran: un recibo equivocado se anula; uno cuyo dinero no se acreditó o se
+    devolvió, se revierte. GET ?desde=&hasta=&estado=&medio=&concepto=&q=  ·  POST {id}/anular/ · {id}/revertir/
     """
 
-    queryset = Pago.objects.select_related(
-        "matricula__alumno", "matricula__seccion__curso", "anio_lectivo", "registrado_por", "anulado_por",
-    ).prefetch_related("detalles__concepto")
-    serializer_class = PagoSerializer
-    permission_classes = [EsAcesOGestion]
-    filtros = ["matricula", "matricula__seccion", "anulado", "medio", "anio_lectivo"]
-    campo_institucion = "anio_lectivo__institucion"
+    queryset = Recibo.objects.select_related("ace", "matricula__alumno", "registrado_por").prefetch_related(
+        "lineas__concepto")
+    serializer_class = ReciboSerializer
+    permission_classes = [PermisoACE]
+    filtros = ["estado", "medio", "serie", "ejercicio"]
+    campo_institucion = "ace__institucion"
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -101,250 +99,106 @@ class PagoViewSet(PorInstitucionMixin, FiltroParamsMixin, mixins.CreateModelMixi
             qs = qs.filter(fecha__gte=_fecha(p["desde"], None))
         if p.get("hasta"):
             qs = qs.filter(fecha__lte=_fecha(p["hasta"], None))
+        if p.get("concepto"):
+            qs = qs.filter(lineas__concepto_id=p["concepto"]).distinct()
+        if p.get("q"):
+            qs = qs.filter(Q(aportante_nombre__icontains=p["q"]) | Q(aportante_documento__icontains=p["q"]))
         return qs
-
-    def perform_create(self, serializer):
-        serializer.save(registrado_por=self.request.user)
 
     @action(detail=True, methods=["post"])
     def anular(self, request, pk=None):
-        pago = self.get_object()
-        motivo = (request.data.get("motivo") or "").strip()
-        if pago.anulado:
-            raise ValidationError("El recibo ya estaba anulado.")
-        if not motivo:
-            raise ValidationError("Indicá el motivo de la anulación.")
-        pago.anulado, pago.motivo_anulacion = True, motivo
-        pago.anulado_por, pago.anulado_en = request.user, timezone.now()
-        pago.save()
-        return Response(self.get_serializer(pago).data)
+        recibo = cerrar_recibo(self.get_object(), request.user, Recibo.Estado.ANULADO, request.data.get("motivo"))
+        return Response(self.get_serializer(recibo).data)
 
-
-# ------------------------------------------------- datos para formularios
-
-@api_view(["GET"])
-@permission_classes([EsAcesOGestion])
-def cursos(request):
-    """Cursos (para elegir a qué cursos corresponde un concepto)."""
-    return Response([{"id": c.id, "descripcion": str(c)} for c in Curso.objects.select_related("nivel", "especialidad").filter(
-        nivel__institucion_id=institucion_de(request).pk)])
+    @action(detail=True, methods=["post"])
+    def revertir(self, request, pk=None):
+        recibo = cerrar_recibo(self.get_object(), request.user, Recibo.Estado.REVERTIDO, request.data.get("motivo"))
+        return Response(self.get_serializer(recibo).data)
 
 
 @api_view(["GET"])
-@permission_classes([EsAcesOGestion])
-def matriculas(request):
-    """Alumnos matriculados en el año activo (para exoneraciones)."""
+@permission_classes([PermisoACE])
+def familias(request):
+    """
+    Buscar a qué familia emitir el recibo: ?q= (mínimo 3 letras) por nombre o C.I. del alumno o del tutor.
+    Devuelve solo nombres para completar el recibo; nunca si la familia aportó o no.
+    """
+    q = (request.query_params.get("q") or "").strip()
+    if len(q) < 3:
+        return Response([])
     anio = _anio(request)
-    qs = Matricula.objects.filter(anio_lectivo=anio, estado__in=Matricula.EN_CURSO).select_related(
-        "alumno", "seccion__curso").order_by("alumno__apellidos", "alumno__nombres")
-    if request.query_params.get("seccion"):
-        qs = qs.filter(seccion_id=request.query_params["seccion"])
-    return Response([{"id": m.id, "alumno": str(m.alumno), "ci": m.alumno.ci, "seccion_id": m.seccion_id,
-                      "seccion": nombre_seccion(m.seccion)} for m in qs])
+    filtro = (Q(alumno__nombres__icontains=q) | Q(alumno__apellidos__icontains=q) | Q(alumno__ci__icontains=q)
+              | Q(alumno__tutores__nombres__icontains=q) | Q(alumno__tutores__apellidos__icontains=q))
+    mats = (Matricula.objects.filter(filtro, anio_lectivo=anio, estado__in=Matricula.EN_CURSO)
+            .select_related("alumno", "seccion__curso").distinct()[:20])
+    tutores = defaultdict(list)
+    for at in AlumnoTutor.objects.filter(alumno__in=[m.alumno_id for m in mats]).select_related("tutor").order_by("-es_principal"):
+        tutores[at.alumno_id].append({"id": at.tutor_id, "nombre": f"{at.tutor.nombres} {at.tutor.apellidos}",
+                                      "ci": at.tutor.ci, "parentesco": at.parentesco})
+    return Response([{"matricula": m.id, "alumno": str(m.alumno), "seccion": f"{m.seccion.curso.nombre} {m.seccion.letra}",
+                      "tutores": tutores[m.alumno_id]} for m in mats])
 
 
-# ------------------------------------------------------------ estado
-
-@api_view(["GET"])
-@permission_classes([EsAcesOGestion])
-def secciones(request):
-    """Resumen de aportes de cada sección del año activo."""
-    anio = _anio(request)
-    est = EstadoAportes(anio)
-    resumenes = [est.resumen(m) for m in est.matriculas()]
-    return Response({**_encabezado(anio), "secciones": est.por_seccion(resumenes, _secciones(anio))})
+def _totales(lineas):
+    return lineas.aggregate(total=Sum("monto"), recibos=Count("recibo", distinct=True))
 
 
 @api_view(["GET"])
-@permission_classes([EsAcesOGestion])
-def seccion(request, pk):
-    """Planilla de una sección: cada alumno con sus cuotas, pagos y deuda."""
-    anio = _anio(request)
-    sec = get_object_or_404(Seccion.objects.select_related("curso"), pk=pk, anio_lectivo=anio)
-    est = EstadoAportes(anio)
-    alumnos = []
-    for m in est.matriculas(seccion=sec):
-        cuotas = est.cuotas(m)
-        alumnos.append({**est.resumen(m, cuotas), "cuotas": cuotas})
-    columnas = []  # una columna por cuota (concepto + mes), en orden
-    for c in est.conceptos:
-        for mes, vence in c.cuotas():
-            if any(q["concepto"] == c.id and q["mes"] == mes for a in alumnos for q in a["cuotas"]):
-                columnas.append({"concepto": c.id, "concepto_nombre": c.nombre, "mes": mes,
-                                 "etiqueta": MESES[mes] if mes else c.nombre, "vence": vence, "monto": c.monto})
-    resumen = est.por_seccion([{k: v for k, v in a.items() if k != "cuotas"} for a in alumnos], [sec])[0]
-    return Response({**_encabezado(anio), "seccion": resumen, "columnas": columnas, "alumnos": alumnos,
-                     "conceptos": ConceptoAporteSerializer(est.conceptos, many=True).data})
-
-
-@api_view(["GET"])
-@permission_classes([EsAcesOGestion])
+@permission_classes([PermisoACE])
 def panel(request):
-    """Estado general de los aportes para el panel con gráficos."""
-    anio = _anio(request)
-    est = EstadoAportes(anio)
-    resumenes, por_cuota, por_concepto = [], defaultdict(lambda: defaultdict(int)), defaultdict(lambda: defaultdict(int))
-    for m in est.matriculas():
-        cuotas = est.cuotas(m)
-        resumenes.append(est.resumen(m, cuotas))
-        for q in cuotas:
-            clave = (q["concepto"], q["mes"])
-            # Con deuda = algo vencido sin pagar; parcial = pagó una parte y todavía no venció.
-            grupo = CON_DEUDA if q["deuda"] else PARCIAL if q["estado"] == PARCIAL else q["estado"]
-            por_cuota[clave][grupo] += 1
-            pc = por_concepto[q["concepto"]]
-            for k in ("exigible", "deuda", "pagado", "saldo"):
-                pc[k] += q[k]
-
-    validos = DetallePago.objects.filter(pago__anio_lectivo=anio, pago__anulado=False)
-    recaudado_concepto = dict(validos.values("concepto").annotate(t=Sum("monto")).values_list("concepto", "t"))
-    por_mes = defaultdict(int)
-    for f, monto in validos.values_list("pago__fecha", "monto"):
-        por_mes[(f.year, f.month)] += monto
-    por_medio = defaultdict(int)
-    for medio, monto in validos.values_list("pago__medio", "monto"):
-        por_medio[medio] += monto
-
-    exigible = sum(r["exigible"] for r in resumenes)
-    deuda = sum(r["deuda"] for r in resumenes)
-    hoy = est.hoy
-    meses = []
-    a, mm = anio.fecha_inicio.year, anio.fecha_inicio.month
-    while (a, mm) <= (hoy.year, hoy.month) and (a, mm) <= (anio.fecha_fin.year, anio.fecha_fin.month):
-        meses.append({"mes": f"{a}-{mm:02d}", "etiqueta": f"{MESES[mm]} {a}", "monto": por_mes.get((a, mm), 0)})
-        a, mm = (a + 1, 1) if mm == 12 else (a, mm + 1)
-
-    cuotas = []
-    for c in est.conceptos:
-        for mes, vence in c.cuotas():
-            g = por_cuota.get((c.id, mes))
-            if g:
-                cuotas.append({"concepto": c.nombre, "mes": mes, "etiqueta": MESES[mes] if mes else c.nombre,
-                               "vence": vence, "pagado": g[PAGADO], "parcial": g[PARCIAL], "exonerado": g[EXONERADO],
-                               "con_deuda": g[CON_DEUDA], "por_vencer": g[POR_VENCER]})
-
+    """Totales del ejercicio activo: por concepto, tipo, mes y medio. Sin datos por familia."""
+    ace_, anio = _ace(request), _anio(request)
+    lineas = LineaRecibo.objects.filter(recibo__ace=ace_, recibo__ejercicio=anio.anio)
+    vigentes = lineas.filter(recibo__estado=Recibo.Estado.EMITIDO)
+    no_vigentes = lineas.exclude(recibo__estado=Recibo.Estado.EMITIDO)
+    tipos = dict(ConceptoAporte.Tipo.choices)
+    medios = dict(Recibo.Medio.choices)
     return Response({
-        **_encabezado(anio),
-        "totales": {
-            "recaudado": sum(recaudado_concepto.values()),
-            "exigible": exigible, "deuda": deuda,
-            "saldo": sum(r["saldo"] for r in resumenes),
-            # Total que se espera cobrar en el año (sin exonerados) y cuánto de eso ya se cobró.
-            "total_anual": sum(r["pagado"] + r["saldo"] for r in resumenes),
-            "porcentaje_pagado": pct(sum(r["pagado"] for r in resumenes),
-                                     sum(r["pagado"] + r["saldo"] for r in resumenes)),
-            "cumplimiento": pct(exigible - deuda, exigible),
-            "recibos": Pago.objects.filter(anio_lectivo=anio, anulado=False).count(),
-            "anulados": Pago.objects.filter(anio_lectivo=anio, anulado=True).count(),
-            "recaudado_hoy": validos.filter(pago__fecha=hoy).aggregate(t=Sum("monto"))["t"] or 0,
-        },
-        "familias": {
-            "alumnos": len(resumenes),
-            "al_dia": sum(1 for r in resumenes if r["estado"] == AL_DIA),
-            "con_deuda": sum(1 for r in resumenes if r["estado"] == CON_DEUDA),
-            "exonerados": sum(1 for r in resumenes if r["estado"] == EXONERADO_TOTAL),
-            "sin_cuotas": sum(1 for r in resumenes if r["estado"] == SIN_CUOTAS),
-            "completos": sum(1 for r in resumenes if r["avance"] == COMPLETO),
-            "parciales": sum(1 for r in resumenes if r["avance"] == PAGO_PARCIAL),
-            "sin_pagos": sum(1 for r in resumenes if r["avance"] == SIN_PAGOS),
-        },
-        "por_mes": meses,
-        "por_medio": [{"medio": label, "monto": por_medio.get(valor, 0)} for valor, label in Pago.Medio.choices],
-        "por_concepto": [{
-            "id": c.id, "concepto": c.nombre, "periodicidad": c.get_periodicidad_display(), "monto": c.monto,
-            "recaudado": recaudado_concepto.get(c.id, 0),
-            "exigible": por_concepto[c.id]["exigible"], "deuda": por_concepto[c.id]["deuda"],
-            "saldo": por_concepto[c.id]["saldo"],
-            "porcentaje_pagado": pct(por_concepto[c.id]["pagado"], por_concepto[c.id]["pagado"] + por_concepto[c.id]["saldo"]),
-            "cumplimiento": pct(por_concepto[c.id]["exigible"] - por_concepto[c.id]["deuda"],
-                                por_concepto[c.id]["exigible"]),
-        } for c in est.conceptos],
-        "cuotas": cuotas,
-        "secciones": est.por_seccion(resumenes, _secciones(anio)),
+        "ace": ace_.denominacion, "ejercicio": anio.anio, "generado": timezone.localtime().isoformat(),
+        "total": _totales(vigentes)["total"] or 0,
+        "recibos": _totales(vigentes)["recibos"] or 0,
+        "anulados_o_revertidos": {"recibos": _totales(no_vigentes)["recibos"] or 0, "monto": _totales(no_vigentes)["total"] or 0},
+        "por_concepto": [{"concepto": f["concepto__nombre"], "total": f["total"], "recibos": f["recibos"]}
+                         for f in vigentes.values("concepto__nombre").annotate(
+                             total=Sum("monto"), recibos=Count("recibo", distinct=True)).order_by("-total")],
+        "por_tipo": [{"tipo": tipos.get(f["concepto__tipo"], f["concepto__tipo"]), "total": f["total"]}
+                     for f in vigentes.values("concepto__tipo").annotate(total=Sum("monto")).order_by("-total")],
+        "por_mes": [{"mes": f["mes"].strftime("%Y-%m"), "total": f["total"]}
+                    for f in vigentes.annotate(mes=TruncMonth("recibo__fecha")).values("mes")
+                    .annotate(total=Sum("monto")).order_by("mes")],
+        "por_medio": [{"medio": medios.get(f["recibo__medio"], f["recibo__medio"]), "total": f["total"]}
+                      for f in vigentes.values("recibo__medio").annotate(total=Sum("monto")).order_by("-total")],
     })
 
 
-# ---------------------------------------------------------- reportes
-
 @api_view(["GET"])
-@permission_classes([EsAcesOGestion])
+@permission_classes([PermisoACE])
 def reporte_recaudacion(request):
     """
-    Rendición de lo cobrado en un período (?desde=&hasta=&seccion=).
-    Lista cada recibo (también los anulados, marcados) y totaliza por concepto, medio y día.
+    Rendición de lo recaudado: ?desde=&hasta= (por defecto, el ejercicio activo hasta hoy).
+    Lista los recibos emitidos en el período (también anulados y revertidos, marcados) con totales por
+    concepto y medio. Solo incluye a quienes aportaron: nunca a quienes no.
     """
-    anio = _anio(request)
-    hoy = date.today()
-    desde = _fecha(request.query_params.get("desde"), hoy.replace(day=1))
-    hasta = _fecha(request.query_params.get("hasta"), hoy)
+    ace_, anio = _ace(request), _anio(request)
+    desde = _fecha(request.query_params.get("desde"), anio.fecha_inicio)
+    hasta = _fecha(request.query_params.get("hasta"), min(timezone.localdate(), anio.fecha_fin))
     if desde > hasta:
         raise ValidationError("La fecha 'desde' no puede ser posterior a 'hasta'.")
-    pagos = Pago.objects.filter(anio_lectivo=anio, fecha__range=(desde, hasta)).select_related(
-        "matricula__alumno", "matricula__seccion__curso", "registrado_por").prefetch_related(
-        "detalles__concepto").order_by("fecha", "numero")
-    if request.query_params.get("seccion"):
-        pagos = pagos.filter(matricula__seccion_id=request.query_params["seccion"])
-
-    recibos, por_concepto, por_medio, por_dia = [], defaultdict(int), defaultdict(int), defaultdict(int)
-    total = anulado = 0
-    for p in pagos:
-        monto = p.total
-        recibos.append({
-            "id": p.id, "numero": p.numero, "fecha": p.fecha, "alumno": str(p.matricula.alumno),
-            "ci": p.matricula.alumno.ci, "seccion": nombre_seccion(p.matricula.seccion),
-            "detalle": ", ".join(f"{d.concepto.nombre}{f' {MESES[d.mes]}' if d.mes else ''}" for d in p.detalles.all()),
-            "medio": p.get_medio_display(), "referencia": p.referencia, "total": monto,
-            "anulado": p.anulado, "motivo_anulacion": p.motivo_anulacion,
-            "registrado_por": str(p.registrado_por) if p.registrado_por else "",
-        })
-        if p.anulado:
-            anulado += monto
-            continue
-        total += monto
-        por_medio[p.get_medio_display()] += monto
-        por_dia[p.fecha] += monto
-        for d in p.detalles.all():
-            por_concepto[d.concepto.nombre] += d.monto
-
+    recibos = (Recibo.objects.filter(ace=ace_, fecha__range=(desde, hasta))
+               .prefetch_related("lineas__concepto").order_by("fecha", "serie", "numero"))
+    vigentes = LineaRecibo.objects.filter(recibo__in=recibos, recibo__estado=Recibo.Estado.EMITIDO)
+    medios = dict(Recibo.Medio.choices)
     return Response({
-        **_encabezado(anio), "desde": desde, "hasta": hasta,
-        "recibos": recibos, "total": total, "cantidad": sum(1 for r in recibos if not r["anulado"]),
-        "anulados": {"cantidad": sum(1 for r in recibos if r["anulado"]), "monto": anulado},
-        "por_concepto": [{"concepto": k, "monto": v} for k, v in sorted(por_concepto.items())],
-        "por_medio": [{"medio": k, "monto": v} for k, v in sorted(por_medio.items())],
-        "por_dia": [{"fecha": k, "monto": v} for k, v in sorted(por_dia.items())],
+        "ace": ace_.denominacion, "ruc": ace_.ruc, "desde": desde, "hasta": hasta,
+        "generado": timezone.localtime().isoformat(),
+        "total": vigentes.aggregate(t=Sum("monto"))["t"] or 0,
+        "por_concepto": list(vigentes.values("concepto__nombre").annotate(total=Sum("monto")).order_by("concepto__nombre")),
+        "por_medio": [{"medio": medios.get(f["recibo__medio"]), "total": f["total"]}
+                      for f in vigentes.values("recibo__medio").annotate(total=Sum("monto"))],
+        "recibos": [{
+            "id": r.id, "serie": r.serie, "numero": r.numero, "fecha": r.fecha, "aportante": r.aportante_nombre,
+            "conceptos": ", ".join(sorted({linea.concepto.nombre for linea in r.lineas.all()})),
+            "medio": r.get_medio_display(), "total": r.total, "estado": r.estado,
+            "motivo_anulacion": r.motivo_anulacion,
+        } for r in recibos],
     })
-
-
-@api_view(["GET"])
-@permission_classes([EsAcesOGestion])
-def reporte_morosos(request):
-    """
-    Alumnos que deben, con el contacto del tutor (?seccion=).
-    ?incluir=saldo lista todo lo que falta pagar; si no, solo lo vencido.
-    """
-    anio = _anio(request)
-    est = EstadoAportes(anio)
-    campo = "saldo" if request.query_params.get("incluir") == "saldo" else "deuda"
-    filtros = {"seccion_id": request.query_params["seccion"]} if request.query_params.get("seccion") else {}
-    filas = []
-    for m in est.matriculas(**filtros):
-        cuotas = est.cuotas(m)
-        r = est.resumen(m, cuotas)
-        if not r[campo]:
-            continue
-        pendientes = defaultdict(list)
-        for q in cuotas:
-            if q[campo]:
-                pendientes[q["concepto_nombre"]].append(q["etiqueta"] if q["mes"] else "")
-        r["detalle"] = "; ".join(f"{k} {' '.join(v)}".strip() for k, v in pendientes.items())
-        filas.append(r)
-    contactos = {}
-    for at in AlumnoTutor.objects.filter(alumno_id__in=[f["alumno_id"] for f in filas]).select_related(
-            "tutor").order_by("-es_principal"):
-        contactos.setdefault(at.alumno_id, {"nombre": str(at.tutor), "telefono": at.tutor.telefono,
-                                            "parentesco": at.parentesco})
-    for f in filas:
-        f["tutor"] = contactos.get(f["alumno_id"])
-    return Response({**_encabezado(anio), "fecha": est.hoy, "incluir": campo, "alumnos": filas,
-                     "total_deuda": sum(f["deuda"] for f in filas), "total_saldo": sum(f["saldo"] for f in filas)})

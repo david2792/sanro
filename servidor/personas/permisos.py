@@ -25,9 +25,16 @@ class GestionEscribePersonalLee(BasePermission):
         return request.method in SAFE_METHODS or request.user.es_gestion
 
 
-class EsAcesOGestion(BasePermission):
-    """Comisión de la ACES o dirección/coordinación/secretaría."""
+class PermisoACE(BasePermission):
+    """
+    La ACE administra sus fondos; la institución no (plan maestro 2.4).
+    Comisión de la ACE (y superusuario): todo. Dirección: solo consulta, por transparencia.
+    """
 
     def has_permission(self, request, view):
         u = request.user
-        return bool(u and u.is_authenticated and (u.es_gestion or u.es_aces))
+        if not (u and u.is_authenticated):
+            return False
+        if u.is_superuser or u.es_aces:
+            return True
+        return request.method in SAFE_METHODS and u.rol == u.Rol.DIRECTOR
