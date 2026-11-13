@@ -29,6 +29,8 @@ class SesionClaseViewSet(PorInstitucionMixin, FiltroParamsMixin, viewsets.ModelV
     permission_classes = [EsPersonal]
     filtros = ["asignacion", "fecha", "docente", "asignacion__seccion"]
     campo_institucion = "asignacion__seccion__anio_lectivo__institucion"
+    # Las clases dadas no se borran (docs/decisiones/0007): se corrigen, y en la Fase 1 se anulan con motivo.
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
         qs = super().get_queryset()  # aplica ?asignacion=&fecha=

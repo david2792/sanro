@@ -123,7 +123,7 @@ class Pago(models.Model):
 class DetallePago(models.Model):
     """Qué cuota cubre el recibo. Una cuota puede pagarse en partes (varios detalles)."""
 
-    pago = models.ForeignKey(Pago, on_delete=models.CASCADE, related_name="detalles")
+    pago = models.ForeignKey(Pago, on_delete=models.PROTECT, related_name="detalles")
     concepto = models.ForeignKey(ConceptoAporte, on_delete=models.PROTECT, related_name="detalles")
     mes = models.PositiveSmallIntegerField(null=True, blank=True, help_text="Vacío en un monto total.")
     monto = models.PositiveIntegerField("Monto (Gs.)")

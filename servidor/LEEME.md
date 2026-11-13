@@ -108,6 +108,30 @@ Quien se matricula a mitad de año no debe los meses anteriores a su matrícula.
 GET `/api/reportes/ausencias/?desde=&hasta=` (gestión): inasistencia por sección, curso, mes, día de la semana,
 materia y alumnos con más ausencias. Inasistencia = (ausentes + justificadas) / registros.
 
+## Núcleo (Fase 0)
+| Uso | Método y URL |
+|---|---|
+| Historial de cambios (solo gestión, de su institución) | GET `/api/auditoria/?modelo=asistencia.registroasistencia&objeto_id=5&usuario=&accion=MODIFICAR&desde=&hasta=` |
+| Descargar un archivo (enlace firmado, vence a los 10 min) | GET `/api/archivos/<firma>/` — la API ya devuelve este enlace en cada campo de archivo |
+
+- Todo alta, cambio o baja queda auditado con usuario, valor anterior y nuevo. El motivo de una corrección se
+  envía en la cabecera `X-Motivo`.
+- `/media/` ya no se publica: los legajos y justificativos solo se abren con el enlace firmado.
+- Cada usuario trabaja con los datos de **su institución**. Un superusuario sin institución ve todas.
+- Las clases dadas, los puntajes cargados y los recibos no se borran (se corrigen; en la Fase 1 se anulan con motivo).
+
+## Registro normativo
+| Uso | Método y URL |
+|---|---|
+| Fuentes (leyes, resoluciones) | `/api/normativa/fuentes/` · POST `/api/normativa/fuentes/{id}/verificar/` |
+| Catálogo de reglas (solo superusuario lo modifica) | `/api/normativa/reglas/` {codigo, nombre, area, tipo_valor} |
+| Versiones de una regla | `/api/normativa/versiones/` {regla, valor, fuente, articulo, nivel, modalidad, vigente_desde, vigente_hasta} |
+| Aprobar una versión (exige fuente) | POST `/api/normativa/versiones/{id}/aprobar/` |
+| Qué versión se aplica | GET `/api/normativa/resolver/?codigo=X&fecha=AAAA-MM-DD&nivel=EM&modalidad=TECNICO` |
+
+Solo se aplican versiones **aprobadas y vigentes**; gana la de alcance más específico (institución, nivel, modalidad).
+Si no hay ninguna, el sistema no inventa un valor: responde 404. Ver `docs/decisiones/0006-registro-normativo.md`.
+
 ## Roles
 - DIRECTOR, COORDINADOR, SECRETARIA: administran todo.
 - DOCENTE: consulta datos y solo llama lista en sus propias clases.

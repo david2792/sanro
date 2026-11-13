@@ -2,17 +2,17 @@
 
 Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de aceptación).
 
-## Fase 0 — Cimientos 🔄
+## Fase 0 — Cimientos ✅ (13/11/2026)
 
 | Paso | Entregable | Criterio de aceptación | Estado |
 |---|---|---|---|
 | 0.1 | Plan maestro, `CLAUDE.md`, ROADMAP y registro de decisiones | Archivos en `docs/` y raíz | ✅ |
-| 0.2 | CI en GitHub Actions | Pruebas del backend, lint y build del frontend corren en cada push y PR | ⬜ |
-| 0.3 | Auditoría base | Crear, modificar y borrar quedan registrados con usuario, cambios y motivo; probado | ⬜ |
-| 0.4 | Archivos privados | `/media/` no es público; descarga por enlace firmado y vencible, auditada; probado | ⬜ |
-| 0.5 | Base para varias instituciones | FK en modelos raíz, datos existentes migrados, vistas filtradas; probado con dos instituciones | ⬜ |
-| 0.6 | Registro normativo | Modelos, resolutor de reglas con vigencia y alcance, fuentes del plan cargadas como "pendientes de verificar"; probado | ⬜ |
-| 0.7 | Sin borrados físicos | Asistencia, puntajes y recibos protegidos contra borrado; probado | ⬜ |
+| 0.2 | CI en GitHub Actions | Pruebas del backend, lint y build del frontend corren en cada push y PR | ✅ (verificado en local; confirmar la primera corrida en GitHub) |
+| 0.3 | Auditoría base | Crear, modificar y borrar quedan registrados con usuario, cambios y motivo; probado | ✅ |
+| 0.4 | Archivos privados | `/media/` no es público; descarga por enlace firmado y vencible, auditada; probado | ✅ |
+| 0.5 | Base para varias instituciones | FK en modelos raíz, datos existentes migrados, vistas filtradas; probado con dos instituciones | ✅ |
+| 0.6 | Registro normativo | Modelos, resolutor de reglas con vigencia y alcance, fuentes del plan cargadas como "pendientes de verificar"; probado | ✅ |
+| 0.7 | Sin borrados físicos | Asistencia, puntajes y recibos protegidos contra borrado; probado | ✅ |
 
 ### Pendientes conocidos que deja la Fase 0
 - Validar en los serializers que las claves foráneas enviadas pertenezcan a la institución del usuario
@@ -20,6 +20,9 @@ Estados: ⬜ pendiente · 🔄 en curso · ✅ terminado (cumple criterios de ac
 - Revisar los reportes que reciben identificadores (`?asignacion=`, `?seccion=`) para que validen la institución.
 - Auditoría detallada de cambios en relaciones muchos-a-muchos.
 - Pantalla de consulta de auditoría y del registro normativo en el frontend (hoy: API y admin).
+- El comando `importar_alumnos` busca secciones del año activo sin filtrar por institución.
+- Mapear cada `Nivel`/`Especialidad` del colegio a las categorías del registro normativo
+  (Tercer Ciclo / Media; Científico / Técnico) para resolver reglas automáticamente.
 
 ## Fase 1 — Asistencia, justificativos y matrícula con historial ⬜
 - Justificativo como proceso aparte con estados (BORRADOR … APROBADO/RECHAZADO); la ausencia no se reemplaza.

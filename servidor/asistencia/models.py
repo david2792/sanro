@@ -46,7 +46,7 @@ class RegistroAsistencia(models.Model):
         TARDANZA = "T", "Llegada tardía"
         JUSTIFICADO = "J", "Ausencia justificada"
 
-    sesion = models.ForeignKey(SesionClase, on_delete=models.CASCADE, related_name="registros")
+    sesion = models.ForeignKey(SesionClase, on_delete=models.PROTECT, related_name="registros")
     matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="asistencias")
     estado = models.CharField(max_length=1, choices=Estado.choices, default=Estado.PRESENTE)
     hora_llegada = models.TimeField("Hora de llegada", null=True, blank=True, help_text="Solo en llegadas tardías.")
@@ -72,7 +72,7 @@ class RegistroAsistencia(models.Model):
 class Justificacion(models.Model):
     """Justificativo de ausencia (certificado médico, nota del tutor) por rango de fechas."""
 
-    matricula = models.ForeignKey(Matricula, on_delete=models.CASCADE, related_name="justificaciones")
+    matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="justificaciones")
     fecha_desde = models.DateField()
     fecha_hasta = models.DateField()
     motivo = models.CharField(max_length=200)

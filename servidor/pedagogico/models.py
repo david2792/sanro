@@ -72,7 +72,7 @@ class RegistroClase(models.Model):
     trabajados/evaluados. Se vincula a la sesión donde llamó lista.
     """
 
-    sesion = models.OneToOneField(SesionClase, on_delete=models.CASCADE, related_name="registro_clase")
+    sesion = models.OneToOneField(SesionClase, on_delete=models.PROTECT, related_name="registro_clase")
     unidad = models.ForeignKey(Unidad, null=True, blank=True, on_delete=models.SET_NULL, related_name="registros")
     capacidades = models.ManyToManyField(Capacidad, blank=True, related_name="registros")
     indicadores_evaluados = models.ManyToManyField(Indicador, blank=True, related_name="registros")
@@ -231,7 +231,7 @@ class Instrumento(models.Model):
 
 
 class Puntaje(models.Model):
-    instrumento = models.ForeignKey(Instrumento, on_delete=models.CASCADE, related_name="puntajes")
+    instrumento = models.ForeignKey(Instrumento, on_delete=models.PROTECT, related_name="puntajes")
     matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="puntajes")
     puntaje = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True,
                                   help_text="Vacío = no entregó / no se evaluó todavía")
@@ -286,8 +286,8 @@ class LogroIndicador(models.Model):
         LOGRADO = "L", "Logrado"
         NO_LOGRADO = "NL", "No logrado"
 
-    indicador = models.ForeignKey(Indicador, on_delete=models.CASCADE, related_name="logros")
-    matricula = models.ForeignKey(Matricula, on_delete=models.CASCADE, related_name="logros_indicador")
+    indicador = models.ForeignKey(Indicador, on_delete=models.PROTECT, related_name="logros")
+    matricula = models.ForeignKey(Matricula, on_delete=models.PROTECT, related_name="logros_indicador")
     estado = models.CharField(max_length=2, choices=Estado.choices)
     registrado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="+"

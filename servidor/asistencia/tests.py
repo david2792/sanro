@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 from academico.models import (AnioLectivo, Asignacion, Curso, Institucion, Materia, Matricula,
                               Nivel, Seccion)
 from personas.models import Alumno, Docente, Usuario
-from .models import SesionClase
+from .models import RegistroAsistencia, SesionClase
 
 
 class FlujoAsistenciaTest(APITestCase):
@@ -78,6 +78,8 @@ class FlujoAsistenciaTest(APITestCase):
             {"matricula": m2, "estado": "P"}]}, format="json")
         regs = {x["matricula"]: x for x in j.data["registros"]}
         self.assertEqual((regs[m1]["estado"], regs[m1]["observacion"]), ("J", "Certificado médico"))
+        # Limpieza de la prueba: las marcas están protegidas (decisión 0007), se quitan explícitamente primero.
+        RegistroAsistencia.objects.filter(sesion_id=j.data["id"]).delete()
         SesionClase.objects.filter(pk=j.data["id"]).delete()
         # Otro día, m2 ausente
         self.client.post("/api/sesiones/", {"asignacion": self.asig.id, "fecha": "2027-03-03",
@@ -91,6 +93,7 @@ class FlujoAsistenciaTest(APITestCase):
         self.assertEqual(otro.status_code, 201, otro.data)
         self.assertNotEqual(otro.data["id"], r.data["id"])
         self.assertEqual(str(SesionClase.objects.get(pk=r.data["id"]).fecha), "2027-03-02")
+        RegistroAsistencia.objects.filter(sesion_id=otro.data["id"]).delete()  # limpieza (decisión 0007)
         SesionClase.objects.filter(pk=otro.data["id"]).delete()
 
         # Otro docente no puede llamar lista en clase ajena ni verla
